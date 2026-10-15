@@ -1,0 +1,202 @@
+<header class="mast">
+  <div class="wrap">
+    <div class="mast-inner">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+          <rect x="1" y="1" width="38" height="38" rx="9" fill="var(--accent)"/>
+          <line x1="8" y1="28" x2="32" y2="28" stroke="var(--accent-ink)" stroke-width="1.5" opacity=".55"/>
+          <rect x="9" y="17" width="5" height="11" rx="1" fill="none" stroke="var(--accent-ink)" stroke-width="1.5" opacity=".7"/>
+          <rect x="17.5" y="14" width="5" height="14" rx="1" fill="none" stroke="var(--accent-ink)" stroke-width="1.5" opacity=".7"/>
+          <rect x="26" y="19" width="5" height="9" rx="1" fill="none" stroke="var(--accent-ink)" stroke-width="1.5" opacity=".7"/>
+          <rect x="9" y="12" width="5" height="16" rx="1" fill="var(--accent-ink)"/>
+          <rect x="17.5" y="9" width="5" height="19" rx="1" fill="var(--accent-ink)"/>
+          <rect x="26" y="13" width="5" height="15" rx="1" fill="var(--accent-ink)"/>
+        </svg>
+        <div>
+          <h1>Manager Effect Lab</h1>
+          <p>Estimate how much each manager causes their teams to beat the performance their members' skills predict. Based on the repeated random assignment method of Weidmann, Deming and colleagues.</p>
+        </div>
+      </div>
+      <nav class="mast-links" aria-label="Sources">
+        <a href="https://www.nber.org/papers/w32699" target="_blank" rel="noopener">Study 1 (NBER w32699)</a>
+        <a href="https://www.nber.org/papers/w33662" target="_blank" rel="noopener">Study 2 (NBER w33662)</a>
+      </nav>
+    </div>
+    <nav class="tabs" aria-label="Sections">
+      <a class="tab" href="#method" data-tab="method"><span class="step">0</span>How it works</a>
+      <a class="tab" href="#design" data-tab="design"><span class="step">1</span>Plan the rotations</a>
+      <a class="tab" href="#analyze" data-tab="analyze"><span class="step">2</span>Estimate manager effects</a>
+      <a class="tab" href="#ai-test" data-tab="ai-test"><span class="step">3</span>AI leadership test</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <!-- ================= METHOD ================= -->
+  <section class="wrap view" id="view-method" data-view="method">
+    <div class="section-head">
+      <div class="eyebrow">The idea</div>
+      <h2>A good manager is one whose teams keep beating the prediction</h2>
+      <p>Team results mix the manager's contribution with the skills of the people they happened to get. The studies separate the two the way a causal analysis would. They predict what each team should score from its members' individually tested skills, which is the counterfactual of an average manager, and then measure how far each manager's teams land above or below that prediction, across several randomly assigned teams.</p>
+    </div>
+
+    <div class="grid-2 top">
+      <div class="panel">
+        <h3>The procedure</h3>
+        <ol class="steps">
+          <li><h4>Test everyone on their own first</h4><p>Measure task-specific skill with an individual version of the team task (Study 1: numerical, spatial and analytical problems; Study 2: a solo hidden-profile puzzle). Add fluid intelligence and any other candidate predictors you want to check later.</p></li>
+          <li><h4>Rotate managers through random teams</h4><p>Each manager leads several teams of randomly drawn members (4 in Study 1, 6 in Study 2), with as few repeat pairings as possible. Random assignment makes the manager effect causal: nobody gets to pick their team.</p></li>
+          <li><h4>Predict every team's score from skills alone</h4><p>Standardise team scores within each round, then regress them on the manager's and the members' task skill.</p><span class="formula">G<sub>g</sub> = β<sub>M</sub>·skill<sub>manager</sub> + β<sub>W</sub>·skill<sub>members</sub> + ε<sub>g</sub></span></li>
+          <li><h4>Average each manager's surplus</h4><p>A manager's effect is the mean residual of the teams they led. A multilevel model separates real differences between managers (σ<sub>α</sub>) from noise, and randomization inference checks whether the spread exceeds what reshuffled assignments produce.</p><span class="formula">α̂<sub>i</sub> = mean(ε̂<sub>g</sub> for teams led by i);  ε̂<sub>gi</sub> = α<sub>i</sub> + e<sub>gi</sub>,  α<sub>i</sub> ~ N(0, σ<sub>α</sub>²)</span></li>
+          <li class="optional"><h4>Optional: replace the human followers with AI agents</h4><p>In Study 2, leaders also directed teams of LLM agents through the same kind of puzzle. Their AI-team scores tracked their causal effect on human teams closely, at a fraction of the cost and without coordinating groups of people.</p></li>
+        </ol>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>One manager, four random teams</h3><span class="eyebrow">Illustration</span></div>
+        <p class="muted small">Each team's predicted score comes from its members' skills. The manager effect is the average gap between what the team actually scored and that prediction.</p>
+        <div class="chart" id="illus"></div>
+        <div class="legend"><span><i style="background:var(--neutral)"></i>Predicted from skills</span><span><i style="background:var(--accent)"></i>Actual team score</span></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="panel">
+        <div class="eyebrow">Study 1 · NBER w32699 · 2024</div>
+        <h3>How Do You Find a Good Manager?</h3>
+        <p class="cite">Weidmann, Vecci, Said, Deming &amp; Bhalotra. 555 participants, 728 three-person teams, Collaborative Production Task, 4 random rotations, pre-registered.</p>
+        <div class="facts">
+          <div class="fact"><span class="big">0.23<span class="small"> SD</span></span><p><strong>Typical manager effect.</strong> A manager 1 SD above average raises team performance by 0.23 SD (randomization inference p = .04), about as much as raising both workers' production skill by 1 SD (0.26 SD). A good manager is worth almost twice a good worker.</p></div>
+          <div class="fact"><span class="big">−0.10</span><p><strong>Self-nominated managers did worse</strong> than managers picked by lottery (−0.10 to −0.13 SD, marginally significant). Self-promoters were more overconfident, especially about their social skills.</p></div>
+          <div class="fact"><span class="big">r .24</span><p><strong>Economic decision-making and fluid IQ</strong> predicted manager performance (lottery arm). Gender, age, ethnicity and personality did not.</p></div>
+          <div class="fact"><span class="big">8% vs 16%</span><p><strong>How good managers help:</strong> they monitor (half the wasted effort), assign people by comparative advantage, and keep teams motivated late in the task.</p></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="eyebrow">Study 2 · NBER w33662 · 2025</div>
+        <h3>Measuring Human Leadership Skills with AI Agents</h3>
+        <p class="cite">Weidmann, Xu &amp; Deming. 249 leaders, hidden-profile puzzles, 6 human teams and 6 AI teams (GPT-4o followers) per leader, order counterbalanced, pre-registered.</p>
+        <div class="facts">
+          <div class="fact"><span class="big">ρ .81</span><p><strong>AI-team scores matched human ground truth.</strong> Disattenuated correlation 0.81 (raw 0.67); 0.69 after controlling for hard skills.</p></div>
+          <div class="fact"><span class="big">0.55<span class="small"> SD</span></span><p><strong>Leader effect beyond hard skills</strong>, nearly identical in the AI and human versions (about 0.65 SD before skill controls).</p></div>
+          <div class="fact"><span class="big">Asks</span><p><strong>Good leaders asked more questions</strong> and had more back-and-forth. Talking more did not help. Positive tone mattered only with human followers.</p></div>
+          <div class="fact"><span class="big">$23</span><p><strong>Per participant for the AI test</strong>, versus $114 and two supervising researchers for the human version.</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel prose">
+      <h3>Read the results with care</h3>
+      <ul>
+        <li>Both papers are working papers, circulated for discussion and not yet peer reviewed. The tasks are lab tasks done mostly by students; field validation is still to come.</li>
+        <li>The causal reading depends on random assignment. In everyday HR data, managers and teams are not matched at random, so the same calculation would be confounded.</li>
+        <li>With four or six rotations, the estimate for any single manager is noisy. Study 1 therefore focused on the typical size of manager effects (σ<sub>α</sub>) and on what predicts them. Use the reliability calculator before ranking individuals.</li>
+        <li>Treat a score as one input among several, and check for adverse impact before using any test in selection.</li>
+      </ul>
+      <p class="small muted">A short summary of both papers: Luděk Stehlík, <a href="https://blog-about-people-analytics.netlify.app/posts/2025-06-12-causal-impact-of-leadership-skills/" target="_blank" rel="noopener">Novel way to measure leadership skills via causal inference (and AI)?</a></p>
+    </div>
+  </section>
+
+  <!-- ================= DESIGN ================= -->
+  <section class="wrap view" id="view-design" data-view="design" hidden>
+    <div class="section-head">
+      <div class="eyebrow">Step 1</div>
+      <h2>Plan the rotations</h2>
+      <p>Assign every manager to a series of randomly drawn teams, keeping repeat pairings to a minimum, and decide how many rotations you need before trusting an individual estimate.</p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>How many rotations do you need?</h3><p>Reliability of one manager's estimate after <span class="mono">n</span> random teams</p></div>
+      <div class="row">
+        <div class="field" style="flex:2 1 340px">
+          <label>Start from</label>
+          <div class="seg" role="group" aria-label="Preset">
+            <button type="button" id="rel-p1" aria-pressed="true">Study 1 task (σ<sub>α</sub> 0.23)</button>
+            <button type="button" id="rel-p2" aria-pressed="false">Study 2 task (σ<sub>α</sub> 0.55)</button>
+          </div>
+        </div>
+        <div class="field"><label for="rel-sa">Manager effect σ<sub>α</sub> <span class="hint">SD of team score</span></label><input id="rel-sa" type="number" step="0.01" min="0.01" max="2" value="0.23"></div>
+        <div class="field"><label for="rel-se">Residual noise σ<sub>e</sub> <span class="hint">SD of team score</span></label><input id="rel-se" type="number" step="0.01" min="0.05" max="3" value="0.92"></div>
+        <div class="field" style="flex:2 1 220px"><label for="rel-n">Teams per manager: <span id="rel-n-out" class="mono">4</span></label><input id="rel-n" type="range" min="1" max="40" value="4"></div>
+      </div>
+      <div class="grid-2" style="align-items:center">
+        <div class="chart" id="rel-chart"></div>
+        <div class="flow" id="rel-text"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>Generate a random rotation</h3><p>Paste IDs one per line, or separated by commas</p></div>
+      <div class="grid-2">
+        <div class="field"><label for="plan-m">Managers</label><textarea id="plan-m" spellcheck="false"></textarea></div>
+        <div class="field"><label for="plan-w">Team members</label><textarea id="plan-w" spellcheck="false"></textarea></div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="plan-k">Members per team</label><input id="plan-k" type="number" min="1" max="12" value="2"></div>
+        <div class="field"><label for="plan-r">Rounds (teams per manager)</label><input id="plan-r" type="number" min="1" max="40" value="4"></div>
+        <div class="field"><label for="plan-seed">Random seed</label><input id="plan-seed" type="number" value="2024"></div>
+        <div class="btn-row"><button class="btn primary" id="plan-go" type="button">Generate rotation</button><button class="btn" id="plan-ex" type="button">Fill example IDs</button></div>
+      </div>
+      <div id="plan-out" class="flow"></div>
+    </div>
+
+    <div class="panel prose">
+      <h3>Running it well</h3>
+      <ul>
+        <li><strong>Use a task with an objective score</strong> that needs real collaboration and gives the manager real work: assigning people, monitoring progress, keeping the team going. Study 1 scored teams on their weakest module, so nobody could carry the team alone.</li>
+        <li><strong>Measure individual skill before the team sessions</strong>, with an individual analogue of the team task. That measure is what lets the analysis separate leadership from the luck of the draw.</li>
+        <li><strong>Keep roles fixed and assignment random.</strong> Use a fresh, parallel version of the task in each round. The analysis standardises scores within rounds, so differences in difficulty between rounds wash out.</li>
+        <li><strong>Record the selection route</strong> (self-nominated, appointed, lottery) if you want to compare them, and collect candidate predictors such as decision-making tests or 360 ratings for the correlation analysis.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= ANALYZE ================= -->
+  <section class="wrap view" id="view-analyze" data-view="analyze" hidden>
+    <div class="section-head">
+      <div class="eyebrow">Step 2</div>
+      <h2>Estimate manager effects</h2>
+      <p>Load one row per team per round, plus an optional file of individual skill scores. The analysis follows the pre-registered models of Study 1: conditioning regression, manager averages, a REML multilevel model with profile-likelihood intervals, randomization inference, leave-one-round-out validation and the correlates of good management.</p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>Data</h3><div class="btn-row"><button class="btn" id="ex-load" type="button">Load example data</button><button class="btn quiet" id="tpl-dl" type="button">Download templates</button></div></div>
+      <div id="data-note"></div>
+      <div class="grid-2">
+        <div class="drop" id="drop-teams">
+          <div><strong>Team results</strong> <span class="muted small">· required · one row per team per round</span></div>
+          <p class="small muted">Columns: <span class="mono">round, team_id, manager_id, member_ids, team_score</span> (members separated by <span class="mono">;</span>), plus optional design columns such as <span class="mono">arm</span>.</p>
+          <div class="btn-row"><label class="btn" for="file-teams">Choose CSV</label><input type="file" id="file-teams" accept=".csv,.tsv,.txt,text/csv" hidden><button class="btn quiet" type="button" data-paste="teams">Paste instead</button></div>
+          <textarea id="paste-teams" hidden placeholder="Paste CSV text here"></textarea>
+          <div class="status" id="status-teams"></div>
+        </div>
+        <div class="drop" id="drop-people">
+          <div><strong>People and skills</strong> <span class="muted small">· recommended · one row per person</span></div>
+          <p class="small muted">Columns: <span class="mono">person_id</span>, the task-skill scores to control for, and any candidate predictors (tests, ratings, demographics).</p>
+          <div class="btn-row"><label class="btn" for="file-people">Choose CSV</label><input type="file" id="file-people" accept=".csv,.tsv,.txt,text/csv" hidden><button class="btn quiet" type="button" data-paste="people">Paste instead</button></div>
+          <textarea id="paste-people" hidden placeholder="Paste CSV text here"></textarea>
+          <div class="status" id="status-people"></div>
+        </div>
+      </div>
+      <details class="map" id="map">
+        <summary>Columns and model settings</summary>
+        <div class="flow" id="map-body"></div>
+      </details>
+      <div class="btn-row"><button class="btn primary" id="run" type="button">Run analysis</button><span class="small muted" id="run-status"></span></div>
+    </div>
+
+    <div id="results" class="view"></div>
+  </section>
+
+  <!-- ================= AI TEST ================= -->
+  <section class="wrap wide view" id="view-ai-test" data-view="ai-test" hidden>
+    <div id="ai-root" class="view"></div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Built on Weidmann, Vecci, Said, Deming &amp; Bhalotra (2024), <em>How Do You Find a Good Manager?</em> NBER WP 32699, and Weidmann, Xu &amp; Deming (2025), <em>Measuring Human Leadership Skills with AI Agents</em>, NBER WP 33662. This is an independent implementation; numbers it produces are estimates from your data, not results from the papers. The analysis runs entirely in your browser; uploaded files never leave this page. The AI leadership test sends chat messages only to the AI provider you pick (Gemini or Claude), and only after you start it.</p>
+  </div>
+</footer>
+<div class="tip" id="tip" hidden></div>

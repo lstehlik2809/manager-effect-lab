@@ -1,0 +1,13 @@
+{
+  "name": "manager-effect-lab",
+  "private": true,
+  "description": "Static single-page app; npm is only used for the build and tests.",
+  "scripts": {
+    "build": "node build.cjs",
+    "test": "node tests/stats.test.cjs && node tests/puzzles.test.cjs",
+    "test:live": "node tests/live-api.mjs"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "0.131.0"
+  }
+}
