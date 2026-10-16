@@ -51,6 +51,33 @@ check('REML matches ANOVA estimator on balanced data', () => {
   assert(fit.ci[0] < fit.sigmaA && fit.ci[1] > fit.sigmaA);
 });
 
+check('profile-likelihood CI profiles sigma_alpha directly', () => {
+  // Independent brute force: for each candidate sigma_A, maximise the REML likelihood over a
+  // fine grid of sigma_E; the interval ends where that profile drops 1.92 below its maximum.
+  const rand = S.rng(3); const G = 60, n = 6, vals = [], grp = [];
+  for (let g = 0; g < G; g++) { const a = 0.5 * S.randn(rand); for (let k = 0; k < n; k++) { vals.push(a + S.randn(rand)); grp.push(g); } }
+  const gs = S.groupSummaries(vals, grp, G), fit = S.remlFit(gs, true);
+  const yb = [], ns = []; let W = 0, N = 0;
+  for (let i = 0; i < G; i++) { const m = gs.sum[i] / gs.n[i]; yb.push(m); ns.push(gs.n[i]); W += gs.ss[i] - gs.n[i] * m * m; N += gs.n[i]; }
+  const ll = (sA2, s2e) => {
+    const g = sA2 / s2e; let sw = 0, swy = 0, sl = 0;
+    for (let i = 0; i < G; i++) { const w = ns[i] / (1 + ns[i] * g); sw += w; swy += w * yb[i]; sl += Math.log(1 + ns[i] * g); }
+    const mu = swy / sw; let Q = W;
+    for (let i = 0; i < G; i++) Q += ns[i] / (1 + ns[i] * g) * (yb[i] - mu) ** 2;
+    return -0.5 * ((N - 1) * Math.log(s2e) + sl + Math.log(sw) + Q / s2e);
+  };
+  const prof = sA => { let best = -Infinity; for (let k = 0; k <= 4000; k++) best = Math.max(best, ll(sA * sA, 0.4 + k * 0.0004)); return best; };
+  const drop = prof(fit.sigmaA) - 1.920729;
+  console.log('     CI ' + fit.ci.map(v => v.toFixed(4)).join('-') + ', profile at ends ' + fit.ci.map(v => (prof(v) - drop).toFixed(4)).join(', '));
+  fit.ci.forEach(v => assert(Math.abs(prof(v) - drop) < 0.01, 'profile drop at ' + v));
+  assert(Math.abs(fit.ci[0] - 0.2782) < 0.001 && Math.abs(fit.ci[1] - 0.5794) < 0.001);
+});
+
+check('t critical values', () => {
+  assert(Math.abs(S.tCrit(3) - 3.182) < 0.002);
+  assert(Math.abs(S.tCrit(1e6) - 1.960) < 0.002);
+});
+
 check('REML returns zero when there is no group effect (most sims)', () => {
   const rand = S.rng(4); let zeros = 0, sum = 0;
   for (let s = 0; s < 100; s++) {
@@ -96,17 +123,19 @@ check('randomization inference gives small p on example data', () => {
 });
 
 check('randomization inference is calibrated under the null', () => {
-  // shuffle team scores so there is no manager effect; p should be roughly uniform
-  const rand = S.rng(5); let rej = 0, R = 40;
+  // shuffle team scores so there is no manager effect; p should be roughly uniform.
+  // 200 runs keep the Monte Carlo error near 2 points, so a miscalibrated test would fail.
+  const rand = S.rng(5); let rej = 0; const R = 200;
   for (let s = 0; s < R; s++) {
     const t2 = teams.map(t => Object.assign({}, t, { score: 10 + 3 * S.randn(rand) }));
     const r2 = S.analyze({ teams: t2, people, peopleCols: [] }, { skillCols: ['task_numerical'], teamControls: [] });
-    const d = S.riRunner(r2.ri, s + 100)(200);
-    const p = (d.filter(v => v >= r2.fit.sigmaA).length + 1) / 201;
+    const d = S.riRunner(r2.ri, s + 100)(100);
+    const p = (d.filter(v => v >= r2.fit.sigmaA).length + 1) / 101;
     if (p < 0.1) rej++;
   }
-  console.log('     rejection rate at 10% = ' + (rej / R).toFixed(2));
-  assert(rej / R < 0.3);
+  const rate = rej / R, bound = 3 * Math.sqrt(0.1 * 0.9 / R);
+  console.log('     rejection rate at 10% = ' + rate.toFixed(3) + ' over ' + R + ' null datasets (allowed 0.10 ± ' + bound.toFixed(3) + ')');
+  assert(Math.abs(rate - 0.1) < bound);
 });
 
 check('rotation planner avoids repeat manager-member pairs', () => {
@@ -114,6 +143,49 @@ check('rotation planner avoids repeat manager-member pairs', () => {
   const r = S.planRotation(M, W, 2, 4, 1);
   console.log('     max repeat ' + r.maxRepeatManagerMember + ', member pair repeats ' + r.repeatMemberPairs + ', sitting out ' + r.sittingOutPerRound);
   assert(r.plan.length === 40 && r.maxRepeatManagerMember === 1);
+});
+
+check('AI group analysis removes solo skill and tracks true leadership', () => {
+  const ex = S.simulateAIGroup(51, 40);
+  const rows = ex.rows.map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, String(v)])));
+  const L = S.aiGroupRows(rows);
+  assert.strictEqual(L.length, 40);
+  assert.deepStrictEqual(Object.keys(L[0].puzzles).sort(), ['t1', 't2', 't3', 't4']);
+  const res = S.aiGroup(L);
+  const eb = res.people.map(p => p.eb);
+  const rTruth = S.cor(eb, res.people.map(p => ex.truth[p.id])).r, rSolo = S.cor(eb, res.people.map(p => p.solo)).r;
+  const raw = S.aiGroup(L, { adjust: false }), rSoloRaw = S.cor(raw.people.map(p => p.eb), raw.people.map(p => p.solo)).r;
+  console.log('     sigma ' + res.fit.sigmaA.toFixed(3) + ' CI ' + res.fit.ci.map(v => v.toFixed(3)).join('-') + ', solo slope ' + res.soloBeta.b.toFixed(2) + ', r(estimate, truth) ' + rTruth.toFixed(2) + ', r(estimate, solo) ' + rSolo.toFixed(3) + ' (unadjusted ' + rSoloRaw.toFixed(2) + ')');
+  assert(res.useSolo && res.soloBeta.b > 0.2 && res.soloBeta.p < 0.01);
+  assert(Math.abs(rSolo) < 0.05 && rSoloRaw > 0.3);
+  assert(rTruth > 0.5);
+  assert(res.fit.ci[0] > 0 && res.fit.ci[0] < res.fit.sigmaA && res.fit.sigmaA < res.fit.ci[1]);
+});
+
+check('AI group analysis puts one and three warm-ups on the same scale', () => {
+  // half the group did only the easiest warm-up; estimates should still track true leadership
+  // and should not differ systematically by warm-up length
+  const ex = S.simulateAIGroup(53, 60, { mixWarmups: true });
+  const rows = ex.rows.map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, String(v)])));
+  const L = S.aiGroupRows(rows);
+  assert.deepStrictEqual(Object.keys(L[1].soloPuzzles), ['s1']);
+  const res = S.aiGroup(L);
+  const eb = res.people.map(p => p.eb), rTruth = S.cor(eb, res.people.map(p => ex.truth[p.id])).r;
+  const short = new Set(L.filter(l => Object.keys(l.soloPuzzles).length === 1).map(l => l.id));
+  const gap = S.mean(res.people.filter(p => short.has(p.id)).map(p => p.eb)) - S.mean(res.people.filter(p => !short.has(p.id)).map(p => p.eb));
+  console.log('     r(estimate, truth) ' + rTruth.toFixed(2) + ', mean estimate one-warm-up minus three-warm-up ' + gap.toFixed(3));
+  assert(res.useSolo && rTruth > 0.5 && Math.abs(gap) < 0.25);
+  assert(res.warnings.some(w => /different numbers of warm-up/.test(w)));
+});
+
+check('AI group analysis handles missing solo scores and small groups', () => {
+  const ex = S.simulateAIGroup(52, 8);
+  const L = S.aiGroupRows(ex.rows);
+  delete L[0].solo; L[0].solo = NaN;
+  const res = S.aiGroup(L);
+  assert.strictEqual(res.nPeople, 7);
+  assert(res.warnings.some(w => /skipped the solo/.test(w)) && res.warnings.some(w => /imprecise/.test(w)));
+  assert.throws(() => S.aiGroup(L.slice(0, 4)), /at least 5 people/);
 });
 
 check('credence score', () => {

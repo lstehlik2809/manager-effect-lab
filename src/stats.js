@@ -251,26 +251,62 @@
     if (ll0 >= ll) { gamma = 0; ll = ll0; }
     const pr = profile(P, gamma);
     const out = { gamma, ll, mu: pr.mu, sigmaE: Math.sqrt(pr.s2e), sigmaA: Math.sqrt(gamma * pr.s2e), N: P.N, groups: P.n.length };
-    if (withCI) out.ci = plCI(P, gamma, ll);
+    if (withCI) out.ci = plCI(P, out);
     return out;
   };
 
-  // Profile-likelihood 95% CI for sigma_A (chi-square 1 df: drop of 1.92 in log-lik)
-  function plCI(P, gHat, llHat) {
+  // Full REML log-likelihood (up to a constant) at sA^2 and sE^2, with mu profiled out.
+  function remlLL(P, sA2, s2e) {
+    const g = sA2 / s2e, { n, ybar } = P;
+    let sw = 0, swy = 0, sl = 0;
+    for (let i = 0; i < n.length; i++) {
+      const w = n[i] / (1 + n[i] * g);
+      sw += w; swy += w * ybar[i];
+      sl += Math.log(1 + n[i] * g);
+    }
+    const mu = swy / sw;
+    let Q = P.Wtot;
+    for (let i = 0; i < n.length; i++) { const d = ybar[i] - mu; Q += (n[i] / (1 + n[i] * g)) * d * d; }
+    return -0.5 * ((P.N - 1) * Math.log(s2e) + sl + Math.log(sw) + Q / s2e);
+  }
+
+  // Profile log-likelihood of sigma_A: sE^2 maximised out (grid on log sE^2, then golden section).
+  function profileSA(P, sA, s2eLo, s2eHi) {
+    const f = u => remlLL(P, sA * sA, Math.exp(u));
+    const lo = Math.log(s2eLo) - 7, hi = Math.log(s2eHi) + 3, steps = 40;
+    let bestU = lo, bestV = -Infinity;
+    for (let s = 0; s <= steps; s++) {
+      const u = lo + (hi - lo) * s / steps, v = f(u);
+      if (v > bestV) { bestV = v; bestU = u; }
+    }
+    let a = bestU - (hi - lo) / steps, b = bestU + (hi - lo) / steps;
+    const gr = (Math.sqrt(5) - 1) / 2;
+    let c = b - gr * (b - a), d = a + gr * (b - a), fc = f(c), fd = f(d);
+    for (let it = 0; it < 60; it++) {
+      if (fc > fd) { b = d; d = c; fd = fc; c = b - gr * (b - a); fc = f(c); }
+      else { a = c; c = d; fc = fd; d = a + gr * (b - a); fd = f(d); }
+    }
+    return Math.max(bestV, f((a + b) / 2));
+  }
+
+  // Profile-likelihood 95% CI for sigma_A itself (chi-square 1 df: drop of 1.92 in log-lik).
+  // Profiling sigma_A directly, not the variance ratio, so the interval is the one its label claims.
+  function plCI(P, fit) {
+    const sHat = fit.sigmaA, s2eHat = fit.sigmaE * fit.sigmaE, s2Tot = s2eHat + sHat * sHat;
+    const llHat = Math.max(remlLL(P, sHat * sHat, s2eHat), profileSA(P, sHat, s2eHat, s2Tot));
     const target = llHat - 1.920729;
-    const sA = g => Math.sqrt(g * profile(P, g).s2e);
-    const f = g => profile(P, g).ll - target;
+    const f = sA => profileSA(P, sA, s2eHat, s2Tot) - target;
     let lower = 0;
-    if (gHat > 0 && f(0) < 0) {
-      let a = 0, b = gHat;
-      for (let it = 0; it < 80; it++) { const m = (a + b) / 2; if (f(m) < 0) a = m; else b = m; }
+    if (sHat > 0 && f(0) < 0) {
+      let a = 0, b = sHat;
+      for (let it = 0; it < 60; it++) { const m = (a + b) / 2; if (f(m) < 0) a = m; else b = m; }
       lower = (a + b) / 2;
     }
-    let b = Math.max(gHat * 2, 0.02), guard = 0;
+    let b = Math.max(sHat * 2, 0.1 * fit.sigmaE), guard = 0;
     while (f(b) > 0 && guard++ < 60) b *= 2;
-    let a = gHat;
-    for (let it = 0; it < 80; it++) { const m = (a + b) / 2; if (f(m) > 0) a = m; else b = m; }
-    return [sA(lower), sA((a + b) / 2)];
+    let a = sHat;
+    for (let it = 0; it < 60; it++) { const m = (a + b) / 2; if (f(m) > 0) a = m; else b = m; }
+    return [lower, (a + b) / 2];
   }
 
   /** Empirical-Bayes (BLUP) manager effects with posterior SDs. */
@@ -656,6 +692,131 @@
     let tv = 0;
     for (let i = 0; i < correct.length; i++) tv += Math.abs((given[i] || 0) - correct[i]);
     return 100 * (1 - tv / 200);
+  };
+
+  /** Two-sided critical value of the t distribution (e.g. level 0.95). */
+  S.tCrit = function (df, level) {
+    const alpha = 1 - (level || 0.95);
+    let a = 0, b = 1000;
+    for (let it = 0; it < 100; it++) { const m = (a + b) / 2; if (S.pT2(m, df) > alpha) a = m; else b = m; }
+    return (a + b) / 2;
+  };
+
+  /* ---------- AI leadership test: a group of leaders (Study 2, models 1–3) ----------
+   * Everyone leads the same AI teammates, so there is no teammate skill to adjust for.
+   * Puzzle scores are standardised within puzzle (puzzles differ in difficulty), model (1)
+   * regresses them on the leader's solo warm-up score (the hard skill), and each leader's
+   * contribution is the mean residual, shrunk with the REML model (3). */
+  const num = v => {
+    if (v == null) return NaN;
+    if (typeof v === 'number') return v;
+    const t = String(v).trim().replace(/^[−–]/, '-').replace(/^(-?\d+),(\d+)$/, '$1.$2');
+    return t === '' ? NaN : Number(t);
+  };
+  /** Rows of the test's results CSV -> leaders { id, solo, soloPuzzles: { s1: score, … }, puzzles: { t1: score, … }, engine, model, version }. */
+  S.aiGroupRows = function (rows) {
+    return rows.map(r => {
+      const team = {}, solo = {};
+      for (const [col, v] of Object.entries(r)) {
+        const x = num(v);
+        if (!isNum(x)) continue;
+        const mt = /^(t\d+)_q\d+$/i.exec(col), ms = /^(s\d+|solo)_q\d+$/i.exec(col);
+        if (mt) (team[mt[1].toLowerCase()] = team[mt[1].toLowerCase()] || []).push(x);
+        else if (ms) (solo[ms[1].toLowerCase()] = solo[ms[1].toLowerCase()] || []).push(x);
+      }
+      const puzzles = {}, soloPuzzles = {};
+      for (const [id, xs] of Object.entries(team)) puzzles[id] = S.mean(xs);
+      for (const [id, xs] of Object.entries(solo)) soloPuzzles[id] = S.mean(xs);
+      let soloScore = num(r.solo_score);
+      if (!isNum(soloScore) && Object.keys(solo).length) soloScore = S.mean(Object.values(solo).flat());
+      return { id: String(r.name || '').trim(), solo: soloScore, soloPuzzles, puzzles, engine: String(r.engine || '').trim() || 'unknown', model: String(r.model || '').trim(), version: String(r.test_version || '').trim() || '1' };
+    }).filter(l => Object.keys(l.puzzles).length);
+  };
+
+  S.aiGroup = function (leaders, opts) {
+    opts = Object.assign({ adjust: true, level: 0.95 }, opts || {});
+    const warnings = [];
+    let L = leaders.filter(l => Object.values(l.puzzles).filter(isNum).length >= 2);
+    if (L.length < leaders.length) warnings.push((leaders.length - L.length) + ' people finished fewer than two team puzzles and were left out.');
+    let useSolo = opts.adjust && L.some(l => isNum(l.solo));
+    if (useSolo) {
+      const before = L.length;
+      L = L.filter(l => isNum(l.solo));
+      if (L.length < before) warnings.push((before - L.length) + ' people skipped the solo warm-up and were left out, because their results cannot be adjusted for reasoning skill.');
+    } else if (opts.adjust) warnings.push('Nobody has a solo warm-up score, so these are total contributions, not adjusted for reasoning skill.');
+    if (L.length < 5) throw new Error('Load results from at least 5 people who completed the team puzzles' + (useSolo ? ' and the solo warm-up' : '') + '.');
+    if (L.length < 20) warnings.push('With ' + L.length + ' people the estimates, and especially the typical effect, are very imprecise. Aim for 20 or more.');
+
+    const pids = [...new Set(L.flatMap(l => Object.keys(l.puzzles)))].sort();
+    const obs = [], used = [];
+    for (const pid of pids) {
+      const idx = L.map((l, i) => (isNum(l.puzzles[pid]) ? i : -1)).filter(i => i >= 0);
+      const vals = idx.map(i => L[i].puzzles[pid]);
+      if (idx.length < 3 || !(S.sd(vals) > 0)) { warnings.push('Puzzle ' + pid + ' was left out: too few people or no variation in scores.'); continue; }
+      const z = S.zscore(vals);
+      idx.forEach((i, k) => obs.push({ li: i, y: z[k] }));
+      used.push(pid);
+    }
+    if (obs.length < 10) throw new Error('Too few puzzle results to fit the model.');
+    // Solo skill: standardise each warm-up puzzle across the group and average a person's puzzles,
+    // so people who did one or three warm-ups (which differ in difficulty) are on the same scale.
+    let skill = null;
+    if (useSolo) {
+      const sids = [...new Set(L.flatMap(l => Object.keys(l.soloPuzzles || {})))].sort(), zs = L.map(() => []);
+      for (const sid of sids) {
+        const idx = L.map((l, i) => (l.soloPuzzles && isNum(l.soloPuzzles[sid]) ? i : -1)).filter(i => i >= 0);
+        const vals = idx.map(i => L[i].soloPuzzles[sid]);
+        if (idx.length < 3 || !(S.sd(vals) > 0)) continue;
+        const z = S.zscore(vals);
+        idx.forEach((i, k) => zs[i].push(z[k]));
+      }
+      skill = zs.every(z => z.length) ? zs.map(z => S.mean(z)) : L.map(l => l.solo);
+      if (new Set(L.map(l => Object.keys(l.soloPuzzles || {}).length)).size > 1) warnings.push('People did different numbers of warm-up puzzles. Each warm-up puzzle was standardised across the group before averaging, so skill scores are on one scale, but those based on one puzzle are noisier.');
+      if (!(S.sd(skill) > 0)) { useSolo = false; skill = null; warnings.push('Everyone has the same solo score, so it cannot be used as a control.'); }
+    }
+    const soloZ = useSolo ? S.zscore(skill) : null;
+    const X = obs.map(o => (useSolo ? [1, soloZ[o.li]] : [1]));
+    const y = obs.map(o => o.y), grp = obs.map(o => o.li);
+    const model = S.ols(X, y);
+    const gsRaw = S.groupSummaries(y, grp, L.length), gs = S.groupSummaries(model.resid, grp, L.length);
+    const fit = S.remlFit(gs, true);
+    if (!fit) throw new Error('Too few people or puzzles to fit the multilevel model.');
+    const eb = S.empiricalBayes(gs, fit), zq = S.normQuantile(0.5 + opts.level / 2);
+    const people = L.map((l, i) => {
+      const e = eb[i], lo = e.eb - zq * e.postSd, hi = e.eb + zq * e.postSd;
+      const scores = used.map(p => l.puzzles[p]).filter(isNum);
+      return { id: l.id, engine: l.engine, model: l.model, version: l.version, solo: l.solo, score: S.mean(scores), n: e.n, total: gsRaw.sum[i] / gsRaw.n[i], raw: e.raw, eb: e.eb, postSd: e.postSd, lambda: e.lambda, lo, hi, cls: lo > 0 ? 'above' : hi < 0 ? 'below' : 'unclear' };
+    });
+    const sorted = people.map(p => p.eb).sort((a, b) => a - b);
+    people.forEach(p => { let k = 0; while (k < sorted.length && sorted[k] < p.eb) k++; p.pct = Math.round(100 * (k + 0.5) / sorted.length); });
+    const soloCor = useSolo ? S.cor(skill, people.map(p => p.total)) : null;
+    people.sort((a, b) => b.eb - a.eb);
+    return {
+      opts, warnings, useSolo, fit, people, puzzles: used, nPeople: L.length, nObs: obs.length,
+      soloBeta: useSolo ? { b: model.beta[1], se: model.se[1], p: model.p[1] } : null,
+      soloCor,
+      reliability: S.mean(people.map(p => p.lambda)), puzzlesPerPerson: S.mean(people.map(p => p.n))
+    };
+  };
+
+  /** Simulated results files for a group: leadership and solo reasoning skill both raise team scores. */
+  S.simulateAIGroup = function (seed, n, opts) {
+    opts = opts || {};
+    const rand = S.rng(seed || 51), N = () => S.randn(rand);
+    const clamp = x => Math.max(0, Math.min(100, Math.round(x)));
+    const base = { t1: 66, t2: 52, t3: 70, t4: 58 }, rows = [], truth = {};
+    for (let i = 0; i < (n || 40); i++) {
+      const id = 'P' + String(i + 1).padStart(2, '0'), skill = N(), lead = N();
+      truth[id] = lead;
+      const row = { name: id, engine: 'simulated', model: '', test_version: '2' };
+      const solo = [];
+      // warm-ups differ in difficulty; with mixWarmups every other person does only the first one
+      Object.entries({ s1: 78, s2: 66, s3: 71 }).forEach(([p, b], k) => [1, 2].forEach(q => { const v = clamp(b + 13 * skill + 12 * N()); if (k && opts.mixWarmups && i % 2) return; row[p + '_q' + q] = v; solo.push(v); }));
+      row.solo_score = S.mean(solo).toFixed(2);
+      Object.keys(base).forEach(p => { const puzzle = 6 * N(); [1, 2].forEach(q => { row[p + '_q' + q] = clamp(base[p] + 7 * skill + 8 * lead + puzzle + 13 * N()); }); });
+      rows.push(row);
+    }
+    return { rows, truth };
   };
 
   root.MEL = S;

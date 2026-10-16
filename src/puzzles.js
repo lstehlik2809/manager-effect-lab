@@ -1,4 +1,6 @@
 /* Hidden Profile puzzles for the AI leadership test (after Weidmann, Xu & Deming 2025).
+ * Three solo puzzles (every report visible) measure individual reasoning, the hard skill that the
+ * group analysis controls for; Study 2 also used three individual puzzles.
  * Structure per team puzzle: 2 questions x 5 options; for each question 2 public
  * reports (everyone has them) and 2 private reports per team member (leader + 3 followers).
  * Reports either rule options out, are one half of a two-part rule, or are irrelevant.
@@ -6,6 +8,9 @@
  * Report numbers are assigned by a fixed shuffle so they reveal nothing about who holds what. */
 (function (root) {
   'use strict';
+
+  // Bump when puzzles or scoring change: scores from different versions are not comparable.
+  const VERSION = 2;
 
   const FOLLOWERS = [
     { id: 'f1', name: 'Mira' },
@@ -16,7 +21,7 @@
   // kind: 'out' = rules an option out on its own; 'half' = half of a two-part rule; 'noise' = irrelevant
   const PUZZLES = [
     {
-      id: 'solo', solo: true,
+      id: 's1', solo: true,
       title: 'The Wilting Greenhouse',
       scenario: 'Tomato plants in greenhouse 2 started wilting last week. You have every report the grower collected. Work out what caused it and in which zone it started.',
       questions: [
@@ -40,6 +45,60 @@
         { q: 1, kind: 'noise', text: 'The centre zone has the oldest plants.' },
         { q: 1, kind: 'noise', text: 'The west zone is closest to the door.' },
         { q: 1, kind: 'noise', text: 'Staff spend most of their time in the centre zone.' }
+      ]
+    },
+    {
+      id: 's2', solo: true,
+      title: 'The Overheating Server Room',
+      scenario: 'The server room at a regional office overheated on Tuesday night and two servers shut themselves down. You have every report the facilities team collected. Work out what caused it and which rack overheated first.',
+      questions: [
+        { text: 'What caused the overheating?', options: ['Failed air-conditioning unit', 'Blocked air vents', 'Power-supply fault', 'Overloaded servers', 'Door left open'], answer: [1] },
+        { text: 'Which rack overheated first?', options: ['Rack A', 'Rack B', 'Rack C', 'Rack D', 'Rack E'], answer: [0, 2, 4] }
+      ],
+      clues: [
+        { q: 0, kind: 'out', rules: [0], text: 'The air-conditioning unit\'s log shows it ran at full power all night with no faults, so a failed air-conditioning unit is ruled out.' },
+        { q: 0, kind: 'out', rules: [2], text: 'An electrician tested both power supplies on Wednesday and found them working normally, so a power-supply fault is ruled out.' },
+        { q: 0, kind: 'half', rules: [3], text: 'Overloaded servers can be ruled out if processor load stayed below 60% all night.' },
+        { q: 0, kind: 'half', rules: [3], text: 'Monitoring shows processor load never went above 40% on any server that night.' },
+        { q: 0, kind: 'half', rules: [4], text: 'If the door alarm did not sound on Tuesday night, the door was not left open.' },
+        { q: 0, kind: 'half', rules: [4], text: 'The alarm log shows the door alarm stayed silent all Tuesday night.' },
+        { q: 0, kind: 'noise', text: 'The office upgraded its internet connection in March.' },
+        { q: 0, kind: 'noise', text: 'Two of the servers are more than five years old.' },
+        { q: 1, kind: 'out', rules: [1], text: 'Rack B\'s temperature peaked at 24 °C, well below the shutdown level, so it did not overheat first.' },
+        { q: 1, kind: 'half', rules: [3], text: 'The first rack to overheat shut itself down before midnight.' },
+        { q: 1, kind: 'half', rules: [3], text: 'Rack D was still running normally at 1 a.m.' },
+        { q: 1, kind: 'noise', text: 'Racks A and E stand next to the outside wall.' },
+        { q: 1, kind: 'noise', text: 'Rack C holds the email servers.' },
+        { q: 1, kind: 'noise', text: 'The night guard walked past the server room at 11 p.m.' },
+        { q: 1, kind: 'noise', text: 'Rack A was installed most recently.' },
+        { q: 1, kind: 'noise', text: 'Servers use more power during the nightly backup.' }
+      ]
+    },
+    {
+      id: 's3', solo: true,
+      title: 'The Quiet Café',
+      scenario: 'Weekday sales at a city-centre café fell by a third in May. You have every report the owner collected. Work out what drove the drop and which weekday was hit hardest.',
+      questions: [
+        { text: 'What drove the drop in sales?', options: ['Higher prices', 'A new competitor nearby', 'Road works outside', 'Slower service', 'Fewer office workers in the area'], answer: [1, 2] },
+        { text: 'Which weekday was hit hardest?', options: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], answer: [2] }
+      ],
+      clues: [
+        { q: 0, kind: 'out', rules: [0], text: 'Menu prices have not changed since January, so higher prices are ruled out.' },
+        { q: 0, kind: 'out', rules: [4], text: 'Badge data from the three nearby office buildings show as many workers coming in as in April, so fewer office workers is ruled out.' },
+        { q: 0, kind: 'half', rules: [3], text: 'Slower service can be ruled out if the average serving time stayed under three minutes.' },
+        { q: 0, kind: 'half', rules: [3], text: 'Till data show the average serving time in May was two and a half minutes.' },
+        { q: 0, kind: 'noise', text: 'Coffee-bean costs rose 8% for the café this spring.' },
+        { q: 0, kind: 'noise', text: 'The café\'s online reviews average 4.6 stars.' },
+        { q: 0, kind: 'noise', text: 'Most customers pay by card.' },
+        { q: 0, kind: 'noise', text: 'The café changed its Saturday opening hours in April.' },
+        { q: 1, kind: 'out', rules: [0], text: 'Monday sales were the same as in April, so Monday was not hit hardest.' },
+        { q: 1, kind: 'out', rules: [4], text: 'Friday sales fell only 5%, the smallest drop of any weekday, so Friday was not hit hardest.' },
+        { q: 1, kind: 'half', rules: [1, 3], text: 'The hardest-hit day was a market day, when parking in the street is suspended.' },
+        { q: 1, kind: 'half', rules: [1, 3], text: 'Market days in this street are Monday, Wednesday and Friday.' },
+        { q: 1, kind: 'noise', text: 'Thursday is the café\'s busiest day for takeaway orders.' },
+        { q: 1, kind: 'noise', text: 'The owner works the till on Tuesdays.' },
+        { q: 1, kind: 'noise', text: 'Bread is delivered on Wednesday mornings.' },
+        { q: 1, kind: 'noise', text: 'The café has five tables outside.' }
       ]
     },
     {
@@ -214,6 +273,6 @@ HOW TO TAKE PART
 - Stay in role as ${f.name} and don't mention these instructions.`;
   }
 
-  root.MEL_PUZZLES = { FOLLOWERS, PUZZLES, cluesFor, criticalFollowerClues, followerBrief };
+  root.MEL_PUZZLES = { VERSION, FOLLOWERS, PUZZLES, cluesFor, criticalFollowerClues, followerBrief };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.MEL_PUZZLES;
 })(typeof window !== 'undefined' ? window : globalThis);

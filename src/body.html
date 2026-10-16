@@ -14,7 +14,7 @@
         </svg>
         <div>
           <h1>Manager Effect Lab</h1>
-          <p>Estimate how much each manager causes their teams to beat the performance their members' skills predict. Based on the repeated random assignment method of Weidmann, Deming and colleagues.</p>
+          <p>How well do you lead a team? Lead three AI teammates through a series of puzzles and see which research-backed leadership habits you use. Inspired by research by Weidmann, Deming and colleagues on measuring managers' causal effect on their teams.</p>
         </div>
       </div>
       <nav class="mast-links" aria-label="Sources">
@@ -23,17 +23,17 @@
       </nav>
     </div>
     <nav class="tabs" aria-label="Sections">
-      <a class="tab" href="#method" data-tab="method"><span class="step">0</span>How it works</a>
-      <a class="tab" href="#design" data-tab="design"><span class="step">1</span>Plan the rotations</a>
-      <a class="tab" href="#analyze" data-tab="analyze"><span class="step">2</span>Estimate manager effects</a>
-      <a class="tab" href="#ai-test" data-tab="ai-test"><span class="step">3</span>AI leadership test</a>
+      <a class="tab" href="#ai-test" data-tab="ai-test">Take the test</a>
+      <a class="tab" href="#method" data-tab="method">The research</a>
+      <a class="tab" href="#design" data-tab="design"><span class="step">HR</span>Plan a team study</a>
+      <a class="tab" href="#analyze" data-tab="analyze"><span class="step">HR</span>Analyse a team study</a>
     </nav>
   </div>
 </header>
 
 <main>
   <!-- ================= METHOD ================= -->
-  <section class="wrap view" id="view-method" data-view="method">
+  <section class="wrap view" id="view-method" data-view="method" hidden>
     <div class="section-head">
       <div class="eyebrow">The idea</div>
       <h2>A good manager is one whose teams keep beating the prediction</h2>
@@ -44,7 +44,7 @@
       <div class="panel">
         <h3>The procedure</h3>
         <ol class="steps">
-          <li><h4>Test everyone on their own first</h4><p>Measure task-specific skill with an individual version of the team task (Study 1: numerical, spatial and analytical problems; Study 2: a solo hidden-profile puzzle). Add fluid intelligence and any other candidate predictors you want to check later.</p></li>
+          <li><h4>Test everyone on their own first</h4><p>Measure task-specific skill with an individual version of the team task (Study 1: numerical, spatial and analytical problems; Study 2: three solo hidden-profile puzzles, plus typing speed). Add fluid intelligence and any other candidate predictors you want to check later.</p></li>
           <li><h4>Rotate managers through random teams</h4><p>Each manager leads several teams of randomly drawn members (4 in Study 1, 6 in Study 2), with as few repeat pairings as possible. Random assignment makes the manager effect causal: nobody gets to pick their team.</p></li>
           <li><h4>Predict every team's score from skills alone</h4><p>Standardise team scores within each round, then regress them on the manager's and the members' task skill.</p><span class="formula">G<sub>g</sub> = β<sub>M</sub>·skill<sub>manager</sub> + β<sub>W</sub>·skill<sub>members</sub> + ε<sub>g</sub></span></li>
           <li><h4>Average each manager's surplus</h4><p>A manager's effect is the mean residual of the teams they led. A multilevel model separates real differences between managers (σ<sub>α</sub>) from noise, and randomization inference checks whether the spread exceeds what reshuffled assignments produce.</p><span class="formula">α̂<sub>i</sub> = mean(ε̂<sub>g</sub> for teams led by i);  ε̂<sub>gi</sub> = α<sub>i</sub> + e<sub>gi</sub>,  α<sub>i</sub> ~ N(0, σ<sub>α</sub>²)</span></li>
@@ -91,6 +91,7 @@
         <li>Both papers are working papers, circulated for discussion and not yet peer reviewed. The tasks are lab tasks done mostly by students; field validation is still to come.</li>
         <li>The causal reading depends on random assignment. In everyday HR data, managers and teams are not matched at random, so the same calculation would be confounded.</li>
         <li>With four or six rotations, the estimate for any single manager is noisy. Study 1 therefore focused on the typical size of manager effects (σ<sub>α</sub>) and on what predicts them. Use the reliability calculator before ranking individuals.</li>
+        <li>The leadership test on this site follows Study 2's structure but uses new puzzles, other AI models, four team puzzles instead of six and its own scoring. It has not been validated against human teams and has no norms, so use it for practice or as a research tool with a group, not to judge an individual.</li>
         <li>Treat a score as one input among several, and check for adverse impact before using any test in selection.</li>
       </ul>
       <p class="small muted">A short summary of both papers: Luděk Stehlík, <a href="https://blog-about-people-analytics.netlify.app/posts/2025-06-12-causal-impact-of-leadership-skills/" target="_blank" rel="noopener">Novel way to measure leadership skills via causal inference (and AI)?</a></p>
@@ -100,9 +101,21 @@
   <!-- ================= DESIGN ================= -->
   <section class="wrap view" id="view-design" data-view="design" hidden>
     <div class="section-head">
-      <div class="eyebrow">Step 1</div>
+      <div class="eyebrow">For HR and research teams · 1 of 2</div>
       <h2>Plan the rotations</h2>
       <p>Assign every manager to a series of randomly drawn teams, keeping repeat pairings to a minimum, and decide how many rotations you need before trusting an individual estimate.</p>
+    </div>
+
+    <div class="panel prose">
+      <h3>What you need to bring</h3>
+      <p>This tab and the next are a toolkit for running your own experiment with real teams. They plan the rotations and analyse the results; they do not run the sessions or supply the task.</p>
+      <ul>
+        <li><strong>A team task with an objective score</strong>, in one parallel version per round. Study 1 used its own Collaborative Production Task: numerical, spatial and analytical modules, with the team scored on its weakest module. Its materials are not included here.</li>
+        <li><strong>An individual version of that task</strong>, taken by everyone before the team sessions, to measure the skill the analysis controls for.</li>
+        <li><strong>People and sessions</strong> for several rounds of random teams. Study 1 had 555 participants, three-person teams and four rounds.</li>
+        <li><strong>A way to record results</strong> in the CSV format that the rotation generator and step 2 provide.</li>
+      </ul>
+      <p class="small muted">Without the capacity to run team sessions, the leadership test (first tab) is self-contained, but it is not a validated assessment.</p>
     </div>
 
     <div class="panel">
@@ -154,7 +167,7 @@
   <!-- ================= ANALYZE ================= -->
   <section class="wrap view" id="view-analyze" data-view="analyze" hidden>
     <div class="section-head">
-      <div class="eyebrow">Step 2</div>
+      <div class="eyebrow">For HR and research teams · 2 of 2</div>
       <h2>Estimate manager effects</h2>
       <p>Load one row per team per round, plus an optional file of individual skill scores. The analysis follows the pre-registered models of Study 1: conditioning regression, manager averages, a REML multilevel model with profile-likelihood intervals, randomization inference, leave-one-round-out validation and the correlates of good management.</p>
     </div>
@@ -189,7 +202,7 @@
   </section>
 
   <!-- ================= AI TEST ================= -->
-  <section class="wrap wide view" id="view-ai-test" data-view="ai-test" hidden>
+  <section class="wrap wide view" id="view-ai-test" data-view="ai-test">
     <div id="ai-root" class="view"></div>
   </section>
 </main>

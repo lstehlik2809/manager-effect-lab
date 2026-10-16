@@ -5,7 +5,8 @@ const read = f => fs.readFileSync(path.join(__dirname, 'src', f), 'utf8');
 const safe = js => js.replace(/<\/script/gi, '<\/script');
 
 const title = 'Manager Effect Lab';
-const description = 'Estimate each manager\'s causal effect on team performance with repeated random assignment, and run an AI leadership test, following Weidmann, Deming et al. (NBER w32699, w33662).';
+const description = 'How well do you lead a team? Lead three AI teammates through hidden-profile puzzles and see which research-backed leadership habits you use. A playful test inspired by Weidmann, Xu & Deming (2025), plus tools for running the method with real teams.';
+const ogTitle = 'How well do you lead a team of AI agents?';
 const fonts = '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
   '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:ital,wght@0,400..700;1,400&display=swap">';
 const css = read('styles.css');
@@ -19,7 +20,7 @@ const full = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${title}</title>
 <meta name="description" content="${description.replace(/"/g, '&quot;')}">
-<meta property="og:title" content="${title}">
+<meta property="og:title" content="${ogTitle}">
 <meta property="og:description" content="${description.replace(/"/g, '&quot;')}">
 ${fonts}
 <style>

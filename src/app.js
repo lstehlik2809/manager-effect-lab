@@ -172,9 +172,9 @@
   const clsColor = c => (c === 'above' ? 'var(--pos)' : c === 'below' ? 'var(--neg)' : 'var(--neutral)');
 
   /* ================= tabs ================= */
-  const TABS = ['method', 'design', 'analyze', 'ai-test'];
+  const TABS = ['ai-test', 'method', 'design', 'analyze'];
   function showTab(name) {
-    if (!TABS.includes(name)) name = 'method';
+    if (!TABS.includes(name)) name = 'ai-test';
     $$('[data-view]').forEach(v => { v.hidden = v.dataset.view !== name; });
     $$('.tab').forEach(t => t.setAttribute('aria-current', t.dataset.tab === name ? 'page' : 'false'));
     if (name === 'analyze') ensureAnalysis();
@@ -670,11 +670,14 @@
 
   const AI = {
     sample: null, sampleState: inClaude ? 'checking' : 'absent',
-    settings: Object.assign({ engine: inClaude ? 'claude' : 'gemini', model: 'claude-opus-5-5', minutes: 6, solo: true, name: '', remember: false, apiKey: '', geminiKey: '' }, store.get('ai.settings', {})),
+    settings: Object.assign({ engine: inClaude ? 'claude' : 'gemini', model: 'claude-opus-5-5', minutes: 6, name: '', remember: false, apiKey: '', geminiKey: '' }, store.get('ai.settings', {})),
     phase: 'intro', order: [], idx: 0, results: [], cur: null, notice: '',
     root: () => $('#ai-root')
   };
   if (!AI.settings.remember) { AI.settings.apiKey = ''; AI.settings.geminiKey = ''; }
+  // number of solo warm-up puzzles (older saved settings had a solo on/off switch)
+  if (![0, 1, 3].includes(AI.settings.warmups)) AI.settings.warmups = AI.settings.solo === false ? 0 : 1;
+  delete AI.settings.solo;
   if (!inClaude && AI.settings.engine === 'claude') AI.settings.engine = 'gemini';
   if (inClaude && (AI.settings.engine === 'api' || AI.settings.engine === 'gemini')) AI.settings.engine = 'claude';
   if (inClaude) {
@@ -702,12 +705,12 @@
   function renderIntro() {
     const st = AI.settings, root = AI.root();
     const last = store.get('ai.last', null);
-    const claudeDesc = AI.sampleState === 'ready' ? 'Teammates run on your Claude account. You will be asked to allow it once.' : AI.sampleState === 'checking' ? 'Checking whether this page can use Claude…' : 'Not available in this view.';
+    const claudeDesc = AI.sampleState === 'ready' ? 'Teammates run on your Claude account. No key needed; you will be asked to allow it once.' : AI.sampleState === 'checking' ? 'Checking whether this page can use Claude…' : 'Not available in this view.';
     const engines = h('div', { class: 'engine-cards' },
       inClaude ? engineCard('claude', 'Claude (in claude.ai)', claudeDesc, AI.sampleState !== 'ready') : [
-        engineCard('gemini', 'Gemini 3.8 Flash', "Teammates run on Google's Gemini API with your own key. Fast and low-cost."),
-        engineCard('api', 'Claude', 'Teammates run on the Anthropic API with your own key.')],
-      engineCard('scripted', 'Scripted teammates', 'Offline, keyword-matching teammates. Good for a dry run; less like real people.'));
+        engineCard('gemini', 'Gemini 3.8 Flash', 'Recommended. Lifelike teammates on Google\'s Gemini API, with your own key.'),
+        engineCard('api', 'Claude', 'Lifelike teammates on the Anthropic API, with your own key.')],
+      engineCard('scripted', 'No key? Scripted teammates', 'Offline teammates that match keywords in your messages. Fine for a first try; less like real people.'));
     let apiBox = '';
     if (!inClaude && st.engine === 'gemini') {
       const keyStatus = h('p', { class: 'small muted', id: 'key-status' });
@@ -716,9 +719,15 @@
           h('div', { class: 'field', style: { flex: '2 1 280px' } }, h('label', { for: 'gemini-key' }, 'Gemini API key ', h('span', { class: 'hint' }, 'from Google AI Studio')),
             h('input', { id: 'gemini-key', type: 'password', autocomplete: 'off', spellcheck: 'false', placeholder: 'AIza…', value: st.geminiKey, oninput: e => { st.geminiKey = e.target.value.trim(); saveSettings(); } })),
           h('div', { class: 'btn-row' }, h('button', { class: 'btn', type: 'button', onclick: () => checkKey(keyStatus) }, 'Check key'))),
+        h('details', { class: 'map' }, h('summary', {}, 'No key yet? Get one in about a minute'),
+          h('ol', { class: 'small', style: { paddingLeft: '1.2em', margin: '0' } },
+            h('li', {}, 'Open ', h('a', { href: 'https://aistudio.google.com/apikey', target: '_blank', rel: 'noopener' }, 'Google AI Studio'), ' and sign in with a Google account.'),
+            h('li', {}, 'Choose "Create API key" and copy it.'),
+            h('li', {}, 'Paste it above and press "Check key".')),
+          h('p', { class: 'small muted' }, 'Check Google\'s pricing and limits for your account. A full test makes roughly 100–250 short requests of about 1,000 tokens each.')),
         h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: st.remember, onchange: e => { st.remember = e.target.checked; saveSettings(); } }), 'Remember the key in this browser'),
         keyStatus,
-        h('p', { class: 'note small' }, 'The key stays in your browser and is sent only to generativelanguage.googleapis.com. Use a key with a budget or quota you are comfortable with. A full test makes roughly 100–250 short requests of about 1,000 tokens each. Teammates think at the low level to keep the chat quick.'));
+        h('p', { class: 'note small' }, 'The key stays in your browser and is sent only to generativelanguage.googleapis.com. Teammates think at the low level to keep the chat quick.'));
     }
     if (!inClaude && st.engine === 'api') {
       const keyStatus = h('p', { class: 'small muted', id: 'key-status' });
@@ -735,27 +744,121 @@
     }
     const timeSel = h('select', { id: 'ai-min', onchange: e => { st.minutes = +e.target.value; saveSettings(); } },
       [[4, '4 minutes'], [6, '6 minutes'], [8, '8 minutes'], [0, 'No time limit']].map(([v, l]) => h('option', { value: v, selected: v === st.minutes }, l)));
-    put(root, 
-      h('div', { class: 'section-head' }, h('div', { class: 'eyebrow' }, 'Step 3 · Study 2'), h('h2', {}, 'Lead a team of AI agents'),
-        h('p', {}, 'In Study 2, how well people led teams of LLM agents predicted how much they improved real human teams (ρ = 0.81). This version recreates the test: you lead three AI teammates, Mira, Theo and Jonas, through hidden-profile puzzles. Each of you holds different reports. Nobody can solve a puzzle alone, so your job is to draw out the right information, keep the team on track, and decide.')),
+    const warmSel = h('select', { id: 'ai-warm', onchange: e => { st.warmups = +e.target.value; saveSettings(); } },
+      [[1, 'Standard · about 20–25 min'], [3, 'Extended · about 30 min'], [0, 'Team puzzles only']].map(([v, l]) => h('option', { value: v, selected: v === st.warmups }, l)));
+    put(root,
+      h('div', { class: 'section-head' }, h('div', { class: 'eyebrow' }, 'Leadership test · inspired by Study 2'), h('h2', {}, 'How well do you lead a team?'),
+        h('p', {}, 'In a 2025 study, how well people led a team of AI agents strongly predicted how much they improved real human teams. Try a version of that test. You lead three AI teammates, Mira, Theo and Jonas, through hidden-profile puzzles. Each of you holds different clues and nobody can solve a puzzle alone, so your job is to draw out the right information, keep the team on track, and decide.'),
+        h('p', { class: 'note' }, h('strong', {}, 'For fun, not a verdict. '), 'This version is inspired by the study, not a copy of it: new puzzles, other AI models, fewer puzzles and its own scoring. It has not been validated, so your result describes how you led today\'s game, not how good a manager you are.')),
       h('div', { class: 'grid-2' },
         h('div', { class: 'panel prose' }, h('h3', {}, 'How it works'),
           h('ol', {},
-            h('li', {}, h('strong', {}, 'Warm-up (solo). '), 'One puzzle where you see every report. It measures how well you reason from clues on your own, the "hard skill" the study controls for.'),
-            h('li', {}, h('strong', {}, 'Four team puzzles. '), 'You see 8 reports; each teammate holds 8 more, half of them shared. Message everyone or one person. Teammates only talk to you.'),
-            h('li', {}, h('strong', {}, 'Answer with probabilities. '), 'Each puzzle has two questions with five options. Reports either rule options out or are irrelevant; the options left standing are equally likely. Spread 100 points across the options accordingly.')),
-          h('p', { class: 'small muted' }, 'Scores run from 0 to 100 (100 = exactly the right distribution; an even split scores 20–60). The app also records the behaviours Study 2 linked to good leadership: questions asked, conversational turn-taking, and how much of the hidden information you surfaced.')),
+            h('li', {}, h('strong', {}, 'Warm-up. '), 'A solo puzzle where you see every clue. You learn the answer format and show how you reason on your own.'),
+            h('li', {}, h('strong', {}, 'Four team puzzles. '), 'You see 8 clues; each teammate holds 8 more, half of them shared. Message everyone or one person. Teammates only talk to you.'),
+            h('li', {}, h('strong', {}, 'Answer with probabilities. '), 'Each puzzle has two questions with five options. Clues either rule options out or are irrelevant; the options left standing are equally likely. Spread 100 points across them.'),
+            h('li', {}, h('strong', {}, 'See how you led. '), 'Your score, the leadership habits the study linked to better team results, a playful leadership style, and a result card to share.')),
+          h('p', { class: 'small muted' }, 'Scores run from 0 to 100 (100 = exactly the right distribution; an even split scores 20–60). Everything runs in your browser; nothing is stored on a server.')),
         h('div', { class: 'panel flow' }, h('h3', {}, 'Set up'),
           h('div', { class: 'field' }, h('label', {}, 'Teammates'), engines),
           apiBox,
+          h('div', { class: 'field' }, h('label', { for: 'ai-warm' }, 'Length'), warmSel,
+            h('span', { class: 'hint' }, 'Standard: 1 warm-up and 4 team puzzles. Extended adds 2 warm-ups for a more precise skill control when comparing a group.')),
           h('div', { class: 'row' },
             h('div', { class: 'field' }, h('label', { for: 'ai-min' }, 'Time per team puzzle'), timeSel),
-            h('div', { class: 'field' }, h('label', { for: 'ai-name' }, 'Name or ID ', h('span', { class: 'hint' }, 'optional, for the results file')), h('input', { id: 'ai-name', type: 'text', value: st.name, oninput: e => { st.name = e.target.value; saveSettings(); } }))),
-          h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: st.solo, onchange: e => { st.solo = e.target.checked; saveSettings(); } }), 'Start with the solo warm-up'),
+            h('div', { class: 'field' }, h('label', { for: 'ai-name' }, 'Name or ID ', h('span', { class: 'hint' }, 'optional, for the result card and file')), h('input', { id: 'ai-name', type: 'text', value: st.name, oninput: e => { st.name = e.target.value; saveSettings(); } }))),
           AI.notice ? h('p', { class: 'note warn' }, AI.notice) : '',
           h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', type: 'button', onclick: startTest }, 'Start the test'),
-            last ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : '')))
+            last ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''))),
+      h('details', { class: 'panel', id: 'ai-group-wrap', open: AI.group.leaders.length ? true : null },
+        h('summary', { class: 'group-summary' }, h('strong', {}, 'For teams and researchers: compare a group of test takers')),
+        h('div', { class: 'flow', id: 'ai-group', style: { marginTop: '14px' } }))
     );
+    renderGroup();
+  }
+  /* ---- comparing a group (Study 2, models 1–3) ---- */
+  AI.group = { leaders: [], files: [], key: null, isExample: false, truth: null, notes: [] };
+  const groupKey = l => l.engine + '|' + l.model + '|' + l.version;
+  const groupLabel = k => { const [e, m, v] = k.split('|'); const eng = { gemini: 'Gemini', api: 'Claude API', claude: 'Claude', scripted: 'scripted', simulated: 'simulated' }[e] || e; return `${eng}${m ? ' · ' + m : ''} · test version ${v}`; };
+  function addGroupRows(parsed, source) {
+    const G = AI.group, rows = S.aiGroupRows(parsed.rows);
+    if (!rows.length) { G.notes.push(source + ' has no team-puzzle scores; is it a results file from this test?'); return; }
+    const base = source.replace(/\.[^.]+$/, '');
+    rows.forEach((l, k) => {
+      let id = l.id || (rows.length > 1 ? base + ' #' + (k + 1) : base), n = 2;
+      if (G.leaders.some(x => x.id === id)) { const orig = id; while (G.leaders.some(x => x.id === orig + ' (' + n + ')')) n++; id = orig + ' (' + n + ')'; G.notes.push(`Two results share the name "${orig}"; they are treated as different people.`); }
+      l.id = id; G.leaders.push(l);
+    });
+    G.files.push(source);
+  }
+  function readGroupFiles(files) {
+    const G = AI.group;
+    if (G.isExample) AI.group = { leaders: [], files: [], key: null, isExample: false, truth: null, notes: [] };
+    let left = files.length;
+    files.forEach(file => {
+      const fr = new FileReader();
+      fr.onload = () => { addGroupRows(parseCSV(fr.result), file.name); if (--left === 0) { AI.group.key = null; renderGroup(); } };
+      fr.onerror = () => { AI.group.notes.push('Could not read ' + file.name + '.'); if (--left === 0) renderGroup(); };
+      fr.readAsText(file);
+    });
+  }
+  function loadGroupExample() {
+    const ex = S.simulateAIGroup(51, 40);
+    AI.group = { leaders: [], files: [], key: null, isExample: true, truth: ex.truth, notes: [] };
+    addGroupRows(parseCSV(toCSV(Object.keys(ex.rows[0]), ex.rows)), 'simulated_group.csv');
+    renderGroup();
+  }
+  function renderGroup() {
+    const box = $('#ai-group'); if (!box) return;
+    const G = AI.group;
+    const input = h('input', { type: 'file', id: 'ai-files', accept: '.csv,.txt,text/csv', multiple: true, hidden: true, onchange: e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) readGroupFiles(f); } });
+    const head = [
+      h('p', { class: 'small' }, 'One person\'s raw score mixes leadership with how well they reason alone. To separate the two, collect the results files (CSV) of several people who took the same version of the test with the same teammates. The analysis standardises each team puzzle across the group, removes the part predicted by the solo warm-up, and shrinks each person\'s estimate toward the group average in proportion to its noise, following models (1)–(3) of Study 2. Everyone leads the same AI teammates, so there is no teammate skill to adjust for.'),
+      h('div', { class: 'btn-row' }, h('label', { class: 'btn', for: 'ai-files' }, 'Choose results files'), input,
+        h('button', { class: 'btn quiet', type: 'button', onclick: loadGroupExample }, 'Load simulated example'),
+        G.leaders.length ? h('button', { class: 'btn quiet', type: 'button', onclick: () => { AI.group = { leaders: [], files: [], key: null, isExample: false, truth: null, notes: [] }; renderGroup(); } }, 'Clear') : ''),
+      h('p', { class: 'small muted' }, G.leaders.length ? `${fmtInt(G.leaders.length)} results from ${fmtInt(G.files.length)} file${G.files.length === 1 ? '' : 's'}. Files are read in your browser and never uploaded.` : 'You can select many files at once, or one file with a row per person. Files are read in your browser and never uploaded.')
+    ];
+    if (G.notes.length) head.push(h('p', { class: 'note warn' }, [...new Set(G.notes)].join(' ')));
+    if (!G.leaders.length) { put(box, head); return; }
+    const counts = new Map();
+    G.leaders.forEach(l => counts.set(groupKey(l), (counts.get(groupKey(l)) || 0) + 1));
+    if (!G.key || !counts.has(G.key)) G.key = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    if (counts.size > 1) head.push(h('div', { class: 'flow' },
+      h('p', { class: 'note warn' }, 'These results come from different teammates or test versions. Scores from different AI models or versions are not comparable, so analyse one set at a time.'),
+      h('div', { class: 'field', style: { maxWidth: '420px' } }, h('label', { for: 'ai-group-key' }, 'Analyse'),
+        h('select', { id: 'ai-group-key', onchange: e => { G.key = e.target.value; renderGroup(); } }, [...counts.entries()].map(([k, n]) => h('option', { value: k, selected: k === G.key }, `${groupLabel(k)} (${n} ${n === 1 ? 'person' : 'people'})`))))));
+    let res;
+    try { res = S.aiGroup(G.leaders.filter(l => groupKey(l) === G.key), { level: 0.95 }); }
+    catch (e) { put(box, head, h('p', { class: 'note warn' }, e.message)); return; }
+    AI.group.result = res;
+    const fit = res.fit, adj = res.useSolo;
+    const c = { above: 0, below: 0, unclear: 0 }; res.people.forEach(p => c[p.cls]++);
+    const tiles = h('div', { class: 'stats' },
+      h('div', { class: 'stat lead' }, h('span', { class: 'label' }, adj ? 'Typical leadership effect (beyond solo skill)' : 'Typical leadership effect (total)'), h('span', { class: 'value' }, fmt(fit.sigmaA, 2), h('span', { class: 'small muted' }, ' SD')), h('span', { class: 'sub' }, `95% CI ${fmt(fit.ci[0], 2)}–${fmt(fit.ci[1], 2)} · profile likelihood`)),
+      adj ? h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Solo skill, per SD'), h('span', { class: 'value' }, fmt(res.soloBeta.b, 2), h('span', { class: 'small muted' }, ' SD')), h('span', { class: 'sub' }, `of team-puzzle score · p ${fmtP(res.soloBeta.p)}`)) : '',
+      h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Reliability per person'), h('span', { class: 'value' }, fmt(res.reliability, 2)), h('span', { class: 'sub' }, `${fmt(res.puzzlesPerPerson, 1)} team puzzles each`)),
+      h('div', { class: 'stat' }, h('span', { class: 'label' }, 'People'), h('span', { class: 'value' }, fmtInt(res.nPeople)), h('span', { class: 'sub' }, `${c.above} above average · ${c.below} below · ${c.unclear} can't tell`)));
+    const verdict = h('p', { class: 'verdict' },
+      fit.ci[0] <= 0 ? 'The spread between people is within what noise alone would produce, so this group cannot be ranked on leadership yet. ' : `People differ in how much they lift their AI team${adj ? ' beyond what their solo reasoning predicts' : ''}: one SD of leadership is worth about ${fmt(fit.sigmaA, 2)} SD of team-puzzle score. `,
+      res.reliability < 0.6 ? `With ${fmt(res.puzzlesPerPerson, 1)} puzzles per person, individual estimates are noisy (reliability ${fmt(res.reliability, 2)}); treat the ranking as provisional.` : `Individual estimates are reasonably reliable (${fmt(res.reliability, 2)}).`,
+      ' These estimates rank people within this group only. They are not validated against leadership of human teams.');
+    const truth = G.isExample && G.truth ? h('p', { class: 'small muted' }, `Simulated data: leadership and solo skill both raise team scores. Correlation between each estimate and true leadership r = ${fmt(S.cor(res.people.map(p => p.eb), res.people.map(p => G.truth[p.id])).r, 2)}; between each estimate and solo skill r = ${fmt(S.cor(res.people.map(p => p.eb), res.people.map(p => p.solo)).r, 2)}.`) : '';
+    const rows = res.people.map(p => h('tr', {},
+      h('td', {}, p.id), h('td', { class: 'num' }, Math.round(p.score)), h('td', { class: 'num' }, isFinite(p.solo) ? Math.round(p.solo) : '–'),
+      h('td', { class: 'num' }, fmtS(p.eb, 2)), h('td', { class: 'num' }, `${fmtS(p.lo, 2)} to ${fmtS(p.hi, 2)}`), h('td', { class: 'num' }, p.pct),
+      h('td', {}, h('span', { class: 'pill ' + (p.cls === 'above' ? 'pos' : p.cls === 'below' ? 'neg' : '') }, h('span', { class: 'dot' }), p.cls === 'above' ? 'Above average' : p.cls === 'below' ? 'Below average' : 'Can\'t tell'))));
+    put(box, head,
+      res.warnings.length ? h('p', { class: 'note warn' }, res.warnings.join(' ')) : '',
+      G.isExample ? h('p', { class: 'note example' }, h('strong', {}, 'Example data. '), 'Forty simulated people. Load your own results files to replace them.') : '',
+      tiles, verdict, truth,
+      h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Person', 'Team score (raw)', 'Solo score', adj ? 'Leadership estimate (SD)' : 'Total estimate (SD)', '95% interval', 'Percentile', 'Classification'].map((t, i) => h('th', { class: i && i < 6 ? 'num' : '' }, t)))), h('tbody', {}, rows))),
+      h('p', { class: 'small muted' }, 'Team and solo scores are 0–100 means. Each estimate is the person\'s average puzzle score, standardised within puzzle' + (adj ? ' and net of solo skill' : '') + ', pulled toward zero in proportion to its noise (empirical Bayes). "Can\'t tell" means the 95% interval includes the group average.'),
+      h('div', { class: 'btn-row' }, h('button', { class: 'btn', type: 'button', onclick: exportGroup }, 'Download estimates (CSV)')));
+  }
+  function exportGroup() {
+    const res = AI.group.result; if (!res) return;
+    const rows = res.people.map(p => ({ person: p.id, engine: p.engine, model: p.model, test_version: p.version, team_score: fmt(p.score, 2), solo_score: fmt(p.solo, 2), team_puzzles: p.n, total_z: p.total.toFixed(4), residual_mean: p.raw.toFixed(4), estimate_eb: p.eb.toFixed(4), interval_low: p.lo.toFixed(4), interval_high: p.hi.toFixed(4), posterior_sd: p.postSd.toFixed(4), percentile: p.pct, classification: p.cls, adjusted_for_solo: res.useSolo ? 1 : 0 }));
+    offerFile('ai_group_estimates.csv', toCSV(Object.keys(rows[0]), rows).replace(/−/g, '-'), 'text/csv');
   }
 
   async function checkKey(el) {
@@ -782,7 +885,7 @@
     if (st.engine === 'gemini' && !st.geminiKey) { AI.notice = 'Enter your Gemini API key, or choose scripted teammates.'; renderIntro(); return; }
     if (st.engine === 'api' && !st.apiKey) { AI.notice = 'Enter your Anthropic API key, or choose scripted teammates.'; renderIntro(); return; }
     if (st.engine === 'claude' && AI.sampleState !== 'ready') { AI.notice = 'Claude is not available in this view. Choose scripted teammates.'; renderIntro(); return; }
-    AI.order = (st.solo ? ['solo'] : []).concat(['t1', 't2', 't3', 't4']);
+    AI.order = PZ.PUZZLES.filter(p => p.solo).slice(0, st.warmups).concat(PZ.PUZZLES.filter(p => !p.solo)).map(p => p.id);
     AI.idx = 0; AI.results = [];
     startPuzzle();
   }
@@ -1130,7 +1233,7 @@
     const p = c.puzzle;
     const scores = p.questions.map((q, qi) => S.credenceScore(c.answers[qi], S.correctDist(q.answer, 5)));
     const flat = p.questions.map(q => S.credenceScore([20, 20, 20, 20, 20], S.correctDist(q.answer, 5)));
-    AI.results.push({ id: p.id, title: p.title, solo: !!p.solo, scores, flat, answers: c.answers.map(a => a.slice()), seconds: elapsed(), metrics: p.solo ? null : processMetrics(c), transcript: c.messages.slice(), engine: c.engine, model: c.engine === 'api' ? AI.settings.model : c.engine === 'gemini' ? LLM.GEMINI_MODEL : null });
+    AI.results.push({ id: p.id, version: PZ.VERSION, title: p.title, solo: !!p.solo, scores, flat, answers: c.answers.map(a => a.slice()), seconds: elapsed(), metrics: p.solo ? null : processMetrics(c), transcript: c.messages.slice(), engine: c.engine, model: c.engine === 'api' ? AI.settings.model : c.engine === 'gemini' ? LLM.GEMINI_MODEL : null });
     AI.phase = 'feedback';
     AI.render();
     window.scrollTo(0, 0);
@@ -1200,57 +1303,168 @@
   }
 
   function summaryNumbers(results) {
-    const team = results.filter(r => !r.solo), solo = results.find(r => r.solo);
-    const all = team.flatMap(r => r.scores);
+    const team = results.filter(r => !r.solo), solo = results.filter(r => r.solo);
+    const all = team.flatMap(r => r.scores), soloAll = solo.flatMap(r => r.scores);
     const solved = all.filter(x => x >= 95).length;
     const avg = k => team.length ? S.mean(team.map(r => r.metrics[k])) : NaN;
-    return { team, solo, teamScore: all.length ? S.mean(all) : NaN, solved, nq: all.length, soloScore: solo ? S.mean(solo.scores) : NaN,
+    // rough 95% range for the raw score, treating puzzles as the units of measurement
+    const per = team.map(r => S.mean(r.scores));
+    let teamLo = NaN, teamHi = NaN;
+    if (per.length >= 2) { const half = S.tCrit(per.length - 1) * S.sd(per) / Math.sqrt(per.length); teamLo = Math.max(0, S.mean(per) - half); teamHi = Math.min(100, S.mean(per) + half); }
+    return { team, solo, teamScore: all.length ? S.mean(all) : NaN, teamLo, teamHi, solved, nq: all.length, soloScore: soloAll.length ? S.mean(soloAll) : NaN, soloN: soloAll.length,
       surfaced: team.reduce((n, r) => n + r.metrics.surfaced, 0), critical: team.reduce((n, r) => n + r.metrics.critical, 0),
       questions: avg('questions'), turns: avg('turns'), words: avg('words'), weRate: avg('weRate') };
   }
+  /* ---- results: habits, a playful style, and a card to share ---- */
+  const APP_URL = 'https://lstehlik2809.github.io/manager-effect-lab/';
+  const RATING = { strong: 'Strong', some: 'Some', little: 'Little' };
+  // Rough thresholds for these puzzles (5–6 decisive hidden clues each), not norms.
+  function habits(N) {
+    const rate = (v, strong, some) => (!isFinite(v) ? 'little' : v >= strong ? 'strong' : v >= some ? 'some' : 'little');
+    const info = N.critical ? N.surfaced / N.critical : NaN;
+    return [
+      { label: 'Asking questions', value: `${fmt(N.questions, 1)} per puzzle`, rating: rate(N.questions, 4, 2), note: 'Leaders who asked more questions got better results, with AI and with human teams.' },
+      { label: 'Back-and-forth', value: `${fmt(N.turns, 1)} turns per puzzle`, rating: rate(N.turns, 10, 5), note: 'More conversational turn-taking went with better team results.' },
+      { label: 'Drawing out hidden clues', value: `${N.surfaced} of ${N.critical} decisive clues`, rating: rate(info, 0.75, 0.4), note: 'Weak leaders learned little from their team: their answers looked like uninformed guesses.' }
+    ];
+  }
+  function leaderStyle(hb) {
+    const [q, t, i] = hb.map(x => x.rating);
+    if (i === 'strong' && (q === 'strong' || t === 'strong')) return { name: 'The Facilitator', text: 'You asked, listened and pulled out what each teammate knew. That is the pattern Study 2 linked to the most effective leaders.' };
+    if (i === 'strong') return { name: 'The Collector', text: 'You got most of the hidden clues out, often by asking for everything at once. Sharper, targeted questions can get you there faster.' };
+    if (q === 'strong' || t === 'strong') return { name: 'The Explorer', text: 'You kept the conversation going, but some decisive clues stayed hidden. Ask each teammate directly about the options still standing.' };
+    if (i === 'little' && q === 'little') return { name: 'The Lone Solver', text: 'You leaned on your own clues. Most decisive clues sat with your teammates, so draw them out before you decide.' };
+    return { name: 'The Coordinator', text: 'You kept the team moving and got part of the picture. A few more follow-up questions would surface the rest.' };
+  }
+  function shareText(N, style) {
+    return `I just led a team of AI agents through ${N.team.length} hidden-profile puzzles: team score ${Math.round(N.teamScore)}/100, ${N.surfaced} of ${N.critical} hidden clues surfaced, leadership style "${style.name}". ` +
+      `It's a playful test inspired by Weidmann, Xu & Deming's research on measuring leadership with AI agents. Try it: ${APP_URL}`;
+  }
+  async function drawCard(N, hb, style, name) {
+    const W = 1200, H = 627, c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    try { await Promise.all(['700 60px Archivo', '400 22px "Public Sans"', '600 22px "Public Sans"'].map(f => document.fonts.load(f))); } catch (e) { /* system fonts */ }
+    const ink = '#14211f', ink2 = '#4c5a57', accent = '#2847c9', pos = '#00806a', rule = '#d2dbd8';
+    const display = w => `${w} Archivo, "Arial Narrow", Arial, sans-serif`, body = w => `${w} "Public Sans", "Segoe UI", Arial, sans-serif`;
+    g.fillStyle = '#eef2f1'; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#ffffff'; g.fillRect(36, 36, W - 72, H - 72);
+    g.fillStyle = accent; g.fillRect(36, 36, 12, H - 72);
+    g.fillStyle = ink2; g.font = body('600 20px'); g.fillText('MANAGER EFFECT LAB  ·  LEADERSHIP TEST', 88, 96);
+    const title = (name ? name + ' led' : 'I led') + ' a team of AI agents';
+    let ts = 46;
+    g.font = display(`700 ${ts}px`);
+    while (g.measureText(title).width > W - 176 && ts > 20) { ts -= 2; g.font = display(`700 ${ts}px`); }
+    g.fillStyle = ink; g.fillText(title, 88, 152);
+    const score = String(Math.round(N.teamScore));
+    g.fillStyle = accent; g.font = display('700 140px'); g.fillText(score, 84, 318);
+    const sw = g.measureText(score).width;
+    g.fillStyle = ink2; g.font = body('500 26px'); g.fillText('/ 100', 96 + sw, 278); g.fillText('team score', 96 + sw, 314);
+    g.fillStyle = ink2; g.font = body('600 20px'); g.fillText('LEADERSHIP STYLE (FOR FUN)', 640, 222);
+    g.fillStyle = ink; g.font = display('700 50px'); g.fillText(style.name, 640, 282);
+    g.strokeStyle = rule; g.lineWidth = 2; g.beginPath(); g.moveTo(88, 350); g.lineTo(W - 88, 350); g.stroke();
+    hb.forEach((x, k) => {
+      const y = 394 + k * 48;
+      g.fillStyle = ink; g.font = body('600 25px'); g.fillText(x.label, 88, y);
+      g.fillStyle = ink2; g.font = body('400 23px'); g.fillText(x.value, 480, y);
+      g.fillStyle = x.rating === 'strong' ? pos : ink2; g.font = body('700 23px'); g.textAlign = 'right'; g.fillText(RATING[x.rating], W - 88, y); g.textAlign = 'left';
+    });
+    g.fillStyle = ink2; g.font = body('400 18px'); g.fillText('A playful test inspired by Weidmann, Xu & Deming (2025). Not a validated assessment.', 88, 538);
+    g.fillStyle = accent; g.font = body('600 20px'); g.fillText('Try it: ' + APP_URL.replace(/^https:\/\//, '').replace(/\/$/, ''), 88, 570);
+    return c;
+  }
+  function saveCard(canvas, status) {
+    canvas.toBlob(async blob => {
+      if (!blob) { status.textContent = 'Could not create the image. Right-click the card to save it.'; return; }
+      if (downloadsCap) {
+        try { await downloadsCap.save({ filename: 'leadership-test-result.png', data: blob }); return; }
+        catch (e) { if (e && e.code === 'declined') return; }
+      }
+      if (inClaude) { status.textContent = 'Saving files is not available here. Right-click the card to save it.'; return; }
+      const url = URL.createObjectURL(blob), a = h('a', { href: url, download: 'leadership-test-result.png' });
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    }, 'image/png');
+  }
+  async function copyText(text, status, okMsg) {
+    try { await navigator.clipboard.writeText(text); status.textContent = okMsg; return true; }
+    catch (e) { textModal('Text for your post', text); return false; }
+  }
+
   function renderSummary() {
-    const R = AI.results, root = AI.root(), N = summaryNumbers(R);
+    const R = AI.results, root = AI.root(), N = summaryNumbers(R), name = (AI.settings.name || '').trim();
     const rows = R.map(r => h('tr', {},
       h('td', {}, r.title + (r.solo ? ' (solo)' : '')), h('td', { class: 'num' }, Math.round(r.scores[0])), h('td', { class: 'num' }, Math.round(r.scores[1])),
       h('td', { class: 'num' }, r.metrics ? `${r.metrics.surfaced}/${r.metrics.critical}` : '–'), h('td', { class: 'num' }, r.metrics ? r.metrics.questions : '–'),
       h('td', { class: 'num' }, r.metrics ? r.metrics.turns : '–'), h('td', { class: 'num' }, r.metrics ? r.metrics.words : '–'),
       h('td', { class: 'num' }, Math.floor(r.seconds / 60) + ':' + String(r.seconds % 60).padStart(2, '0'))));
+    const head = h('div', { class: 'section-head' }, h('div', { class: 'eyebrow' }, 'Your result' + (name ? ' · ' + name : '')), h('h2', {}, 'How you led your AI team'));
+    const again = h('button', { class: 'btn quiet', type: 'button', onclick: () => { AI.phase = 'intro'; AI.render(); } }, 'Take the test again');
+    if (!N.team.length) { put(root, head, h('div', { class: 'panel' }, h('p', {}, 'Complete the team puzzles to see a result.'), again)); return; }
+    const hb = habits(N), style = leaderStyle(hb);
     const pct = N.nq ? Math.round(100 * N.solved / N.nq) : 0;
-    put(root, 
-      h('div', { class: 'section-head' }, h('div', { class: 'eyebrow' }, 'AI leadership test · results' + (AI.settings.name ? ' · ' + AI.settings.name : '')), h('h2', {}, 'How you led your AI team')),
-      h('div', { class: 'panel' },
-        h('div', { class: 'stats' },
-          h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Team-puzzle score'), h('span', { class: 'value' }, isFinite(N.teamScore) ? Math.round(N.teamScore) : '–'), h('span', { class: 'sub' }, `mean of ${N.nq} questions, 0–100`)),
-          h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Questions fully solved'), h('span', { class: 'value' }, `${N.solved} of ${N.nq}`), h('span', { class: 'sub' }, `${pct}% · score of 95 or more`)),
-          h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Solo warm-up score'), h('span', { class: 'value' }, isFinite(N.soloScore) ? Math.round(N.soloScore) : '–'), h('span', { class: 'sub' }, 'reasoning with every report in hand')),
-          h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Hidden information surfaced'), h('span', { class: 'value' }, `${N.surfaced} of ${N.critical}`), h('span', { class: 'sub' }, 'decisive reports held by teammates')),
-          h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Questions asked per puzzle'), h('span', { class: 'value' }, fmt(N.questions, 1)), h('span', { class: 'sub' }, `${fmt(N.turns, 1)} turns · ${fmt(N.words, 0)} words`))),
-        h('p', { class: 'verdict' }, interpret(N, pct))),
+    const range = rangeText(N);
+    const toGroup = e => { e.preventDefault(); AI.phase = 'intro'; AI.render(); setTimeout(() => { const w = $('#ai-group-wrap'); if (w) { w.open = true; w.scrollIntoView({ behavior: 'smooth' }); } }, 30); };
+    const shareStatus = h('span', { class: 'small muted', 'aria-live': 'polite' });
+    const cardBox = h('div', { class: 'card-preview' }, h('span', { class: 'small muted' }, 'Drawing your result card…'));
+    let canvas = null;
+    const text = shareText(N, style);
+    put(root, head,
+      h('div', { class: 'panel flow' },
+        h('div', { class: 'result-hero' },
+          h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Team-puzzle score'), h('span', { class: 'value big' }, Math.round(N.teamScore), h('span', { class: 'small muted' }, ' / 100')), h('span', { class: 'sub' }, `mean of ${N.nq} questions` + (range ? ' · ' + range : ''))),
+          h('div', { class: 'style-box' }, h('span', { class: 'eyebrow' }, 'Your leadership style · for fun'), h('h3', {}, style.name), h('p', {}, style.text))),
+        h('h3', {}, 'The habits behind good leadership'),
+        h('p', { class: 'small muted' }, 'In Study 2, these behaviours separated effective leaders from the rest. Ratings use rough thresholds set for these puzzles, not norms.'),
+        h('div', { class: 'habits' }, hb.map(x => h('div', { class: 'habit' },
+          h('div', {}, h('strong', {}, x.label), h('p', { class: 'small muted' }, x.note)),
+          h('span', { class: 'mono' }, x.value),
+          h('span', { class: 'pill ' + (x.rating === 'strong' ? 'pos' : '') }, h('span', { class: 'dot' }), RATING[x.rating])))),
+        h('p', { class: 'small' }, `You wrote about ${fmt(N.words, 0)} words per puzzle. In the study, the amount of talking made no difference; asking and listening did.`),
+        h('p', { class: 'verdict small' }, interpret(N))),
+      h('div', { class: 'panel flow' },
+        h('div', { class: 'panel-head' }, h('h3', {}, 'Share your result'), h('p', {}, 'Image sized for a LinkedIn post')),
+        cardBox,
+        h('div', { class: 'btn-row' },
+          h('button', { class: 'btn primary', type: 'button', onclick: () => { copyText(text, shareStatus, 'Text copied. Paste it into your post.'); window.open('https://www.linkedin.com/sharing/share-offsite/?url=' + encodeURIComponent(APP_URL), '_blank', 'noopener'); } }, 'Share on LinkedIn'),
+          h('button', { class: 'btn', type: 'button', onclick: () => { if (canvas) saveCard(canvas, shareStatus); } }, 'Download result card'),
+          h('button', { class: 'btn quiet', type: 'button', onclick: () => copyText(text, shareStatus, 'Text copied.') }, 'Copy text'),
+          shareStatus),
+        h('p', { class: 'small muted' }, '"Share on LinkedIn" copies a short text for your post and opens LinkedIn with a link to this test. Attach the result card if you like. Nothing is shared until you post it.')),
       h('div', { class: 'panel' }, h('h3', {}, 'Puzzle by puzzle'),
-        h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Puzzle', 'Q1', 'Q2', 'Info surfaced', 'Questions', 'Turns', 'Words', 'Time'].map((t, i) => h('th', { class: i ? 'num' : '' }, t)))), h('tbody', {}, rows)))),
-      h('div', { class: 'panel prose' }, h('h3', {}, 'How to read this'),
+        h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Puzzle', 'Q1', 'Q2', 'Clues surfaced', 'Questions', 'Turns', 'Words', 'Time'].map((t, i) => h('th', { class: i ? 'num' : '' }, t)))), h('tbody', {}, rows))),
+        h('p', { class: 'small muted' }, `Questions solved (score of 95 or more): ${N.solved} of ${N.nq} (${pct}%). Solo warm-up score: ${isFinite(N.soloScore) ? Math.round(N.soloScore) + ' (mean of ' + N.soloN + ' questions)' : 'skipped'}. "We" language: ${fmt(N.weRate, 1)} per 100 words.`)),
+      h('details', { class: 'panel prose' }, h('summary', { class: 'group-summary' }, h('strong', {}, 'How to read this')),
         h('ul', {},
-          h('li', {}, 'In Study 2, a leader one standard deviation above average fully solved 53% of questions; one standard deviation below, 10%. Bad leaders\' answers looked like uninformed guesses: they learned little from their team.'),
-          h('li', {}, 'The study standardised scores within its sample of 249 leaders and controlled for hard skills (the solo puzzle, fluid IQ and typing speed). A single person\'s score cannot be standardised. To compare people, have a group take the test and load the CSV results into a spreadsheet or the analysis tab of your choice.'),
-          h('li', {}, 'If your solo score is high but your team score is lower, the gap is information gathering: ask each teammate directly, follow up on reports they mention, and check which options are still standing before deciding.'),
-          h('li', {}, 'The scripted teammates are a simplified stand-in. The study used LLM followers prompted like the human participants, and this version\'s puzzles and scoring are an independent reconstruction, not the study\'s materials.'))),
+          h('li', {}, 'Your team-puzzle score is raw. It mixes how well you led with how well you reason on your own, and four puzzles is a small sample. Study 2 measured leadership as team results after controlling for hard skills (three solo puzzles, fluid IQ and typing speed), standardised across its 249 leaders. One person\'s score can do neither.'),
+          h('li', {}, 'The leadership style is a playful summary of the three habits above, not a validated type.'),
+          h('li', {}, 'To compare people properly, collect the results files of a group who took the same version with the same teammates and load them under ', h('a', { href: '#ai-test', onclick: toGroup }, 'compare a group of test takers'), ' on the start screen.'),
+          h('li', {}, 'In Study 2, leaders 1 SD above average gave optimal answers to 53% of questions and leaders 1 SD below average to 10%, averaged over its AI and human versions. Those figures belong to the study\'s own puzzles, GPT-4o teammates and sample. They are not benchmarks for this version.'),
+          h('li', {}, '"Clues surfaced" counts a decisive clue only when a teammate cites its report number, so it undercounts if teammates paraphrase.'),
+          h('li', {}, 'Scores from scripted, Gemini and Claude teammates are not comparable with each other. The scripted teammates are a simplified stand-in for the study\'s LLM followers.'))),
       h('div', { class: 'btn-row' },
-        h('button', { class: 'btn primary', type: 'button', onclick: () => exportAI('csv') }, 'Download results (CSV)'),
+        h('button', { class: 'btn', type: 'button', onclick: () => exportAI('csv') }, 'Download results (CSV)'),
         h('button', { class: 'btn', type: 'button', onclick: () => exportAI('json') }, 'Download with transcripts (JSON)'),
-        h('button', { class: 'btn quiet', type: 'button', onclick: () => { AI.phase = 'intro'; AI.render(); } }, 'Take the test again')));
+        again));
+    drawCard(N, hb, style, name).then(c => {
+      canvas = c;
+      put(cardBox, h('img', { src: c.toDataURL('image/png'), alt: `Result card: team score ${Math.round(N.teamScore)} out of 100, leadership style ${style.name}, ${hb.map(x => x.label + ' ' + RATING[x.rating].toLowerCase()).join(', ')}.` }));
+    }).catch(() => put(cardBox, h('span', { class: 'small muted' }, 'The result card could not be drawn in this browser.')));
   }
-  function interpret(N, pct) {
+  const rangeText = N => (isFinite(N.teamLo) && Math.round(N.teamHi) > Math.round(N.teamLo) ? `rough 95% range ${Math.round(N.teamLo)}–${Math.round(N.teamHi)}` : '');
+  function interpret(N) {
     if (!N.team.length) return 'Complete the team puzzles to see a result.';
-    const parts = [];
-    parts.push(pct >= 50 ? `You fully solved ${pct}% of team questions, in line with the strong leaders in Study 2.` : pct >= 25 ? `You fully solved ${pct}% of team questions, between the study's weak (10%) and strong (53%) leaders.` : `You fully solved ${pct}% of team questions, close to the study's weaker leaders.`);
-    if (N.critical) parts.push(` Your teammates passed on ${N.surfaced} of the ${N.critical} decisive reports they held.`);
-    if (isFinite(N.soloScore) && isFinite(N.teamScore)) parts.push(N.soloScore - N.teamScore > 15 ? ' Your solo score is well above your team score, so drawing information out of the team is where most of the points went.' : ' Your team score keeps up with your solo reasoning, which means the team was not the bottleneck.');
-    return parts.join('');
+    return 'Your score describes this game only: it mixes how well you led with how well you reason on your own, and four puzzles is a small sample' +
+      (rangeText(N) ? ` (${rangeText(N)})` : '') +
+      '. There are no norms for this version, so it cannot say how you compare with the leaders in Study 2 or with other people.' +
+      (N.soloN ? '' : ' You skipped the warm-up, so this result cannot be adjusted for reasoning skill in a group comparison.');
   }
   function exportAI(kind) {
     const R = AI.results, N = summaryNumbers(R), name = AI.settings.name || '';
-    if (kind === 'json') { offerFile('ai_leadership_test.json', JSON.stringify({ name, finished: new Date().toISOString(), summary: N.team.length ? { team_score: N.teamScore, solved: N.solved, questions: N.nq, solo_score: N.soloScore } : null, puzzles: R }, null, 2), 'application/json'); return; }
-    const row = { name, finished: new Date().toISOString(), engine: R[0] ? R[0].engine : '', model: R[0] && R[0].model || '', team_score: fmt(N.teamScore, 2), questions_solved: N.solved, questions: N.nq, solo_score: fmt(N.soloScore, 2), info_surfaced: N.surfaced, info_total: N.critical, questions_per_puzzle: fmt(N.questions, 2), turns_per_puzzle: fmt(N.turns, 2), words_per_puzzle: fmt(N.words, 1), we_per_100_words: fmt(N.weRate, 2) };
+    const uniq = xs => [...new Set(xs.filter(Boolean))].join('+');
+    const engine = uniq(R.map(r => r.engine)), model = uniq(R.map(r => r.model)), version = R[0] && R[0].version || 1;
+    if (kind === 'json') { offerFile('ai_leadership_test.json', JSON.stringify({ name, finished: new Date().toISOString(), test_version: version, summary: N.team.length ? { team_score: N.teamScore, team_score_range: [N.teamLo, N.teamHi], solved: N.solved, questions: N.nq, solo_score: N.soloScore, solo_questions: N.soloN } : null, puzzles: R }, null, 2), 'application/json'); return; }
+    const row = { name, finished: new Date().toISOString(), test_version: version, engine, model, team_score: fmt(N.teamScore, 2), team_score_low: fmt(N.teamLo, 2), team_score_high: fmt(N.teamHi, 2), questions_solved: N.solved, questions: N.nq, solo_score: fmt(N.soloScore, 2), solo_questions: N.soloN, info_surfaced: N.surfaced, info_total: N.critical, questions_per_puzzle: fmt(N.questions, 2), turns_per_puzzle: fmt(N.turns, 2), words_per_puzzle: fmt(N.words, 1), we_per_100_words: fmt(N.weRate, 2) };
     R.forEach(r => { row[r.id + '_q1'] = fmt(r.scores[0], 1); row[r.id + '_q2'] = fmt(r.scores[1], 1); });
     offerFile('ai_leadership_test.csv', toCSV(Object.keys(row), [row]).replace(/−/g, '-'), 'text/csv');
   }

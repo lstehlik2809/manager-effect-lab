@@ -289,3 +289,17 @@ footer { border-top: 1px solid var(--rule); padding-block: 22px 40px; color: var
 @media (max-width: 1080px) { .ai-grid.solo .brief { grid-column: auto; } }
 @media (max-width: 720px) { .ai-grid.solo { grid-template-columns: minmax(0, 1fr); } }
 :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+/* Results of the leadership test: score + playful style, research-backed habits, share card */
+.result-hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 14px; align-items: stretch; }
+.stat .value.big { font-family: var(--font-display); font-size: 3.4rem; font-weight: 750; color: var(--accent); }
+.style-box { border: 1px solid var(--rule); border-radius: 9px; padding: 13px 16px; background: var(--accent-wash); display: grid; gap: 4px; align-content: start; }
+.style-box h3 { margin: 0; font-family: var(--font-display); font-size: 1.7rem; }
+.style-box p { margin: 0; }
+.habits { display: grid; gap: 0; border-top: 1px solid var(--rule-2); }
+.habit { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px 16px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--rule-2); }
+.habit p { margin: 2px 0 0; }
+@media (max-width: 560px) { .habit { grid-template-columns: minmax(0, 1fr) auto; } .habit > div { grid-column: 1 / -1; } }
+.card-preview img { display: block; width: 100%; max-width: 720px; height: auto; border: 1px solid var(--rule); border-radius: 8px; }
+details.panel > summary.group-summary { cursor: pointer; }
+details.panel[open] > summary.group-summary { margin-bottom: 4px; }
