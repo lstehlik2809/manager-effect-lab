@@ -73,11 +73,56 @@
     const t = s.replace(LEAD, '').trim();
     return ASK.test(t) && !/^(please\s+)?(submit|wait|stop|hold on|be quiet)\b/i.test(t);
   }
-  /** Who a leader message is for: its recipient, or the teammates a message to everyone names. */
+  /* ---------- who a message to everyone is for ---------- */
+  // A teammate is addressed by name ("Theo, …", "…, Theo?", "Hi Theo", "@Theo", "Theo what do you have?"),
+  // not merely mentioned ("Theo said…", "Theo's report", "ask Theo", "agree with Theo").
+  const NAME = '@?(?:' + FOL.map(f => f.name).join('|') + ')';
+  const NAMES_ONLY = new RegExp('^' + NAME + '(?:\\s*(?:,|&|\\+|/|\\band\\b)\\s*' + NAME + ')*[\\s?!.]*$', 'i');
+  const NAME_FIRST = new RegExp('^(' + NAME + ')\\s+(.+)$', 'i'), NAME_LAST = new RegExp('(\\S+)\\s+(' + NAME + ')[\\s?!.]*$', 'i');
+  const AT_NAME = new RegExp('@(?:' + FOL.map(f => f.name).join('|') + ')\\b', 'gi');
+  const VOC_LEAD = /^(?:(?:ok|okay|so|and|also|but|right|now|then|next|btw|hi|hey|hello|hiya|yo|dear|morning|good morning|thanks|thank you|thx|cheers|great|nice|perfect|cool)\b[\s!.]*)+/i;
+  // after a name that opens a clause: words that turn to that person. "do", "are", "were" and "have" cannot
+  // follow a third-person name, so "Jonas were the bottles dry?" addresses Jonas; "did", "can"… need a "you".
+  const TO_YOU = /^(?:what|which|who|whom|whose|when|where|why|how|any|anything|tell|share|send|give|list|check|confirm|explain|describe|please|pls|you|your|do|are|were|have|over to you)\b|^(?:did|can|could|would|will|should|may|might)\s+(?:you|u)\b/i;
+  // before a name that closes a clause: words that make it a mention ("agree with Theo", "ask Theo")
+  const ABOUT = new Set(('about after against among around as at before behind between beyond by except for from in including into like near of off on onto per than through to toward towards under unlike until upon versus vs via with without ' +
+    'and or nor plus ask asked asking tell told telling hear heard thank thanked agree agreed believe trust ping pinged cc call called quote quoted see saw follow followed is was isnt wasnt that not just only even').split(' '));
+  const EVERYONE = /\b(everyone|everybody|all of you|you all|y'?all|each of you|any of you|anyone|anybody|someone|somebody|team|guys|folks)\b/i;
+  const ACK = /\b(thanks|thank you|thx|cheers|great|nice|perfect|good point|got it|noted)\b/i;
+  const nameIds = t => FOL.filter(f => new RegExp('\\b' + f.name + '\\b', 'i').test(t)).map(f => f.id);
+  /** Teammates addressed by name in one sentence. */
+  function vocatives(s) {
+    const out = new Set(), add = t => nameIds(t).forEach(id => out.add(id));
+    String(s).split(/[,;:()–—]|\s-\s/).forEach(raw => {
+      const c = raw.trim().replace(VOC_LEAD, '').trim();
+      if (!c) return;
+      if (NAMES_ONLY.test(c)) return add(c);
+      const first = c.match(NAME_FIRST), last = c.match(NAME_LAST);
+      if (first && TO_YOU.test(first[2])) add(first[1]);
+      if (last && !ABOUT.has(last[1].toLowerCase().replace(/['’]/g, ''))) add(last[2]);
+      (c.match(AT_NAME) || []).forEach(add);
+    });
+    return out;
+  }
+  /**
+   * Who a leader message is for: its recipient, or, for a message to everyone, the teammates its questions
+   * address by name (else those its other sentences address, leaving out a passing "thanks, Theo"); everyone otherwise.
+   */
   function audienceOf(m) {
+    const all = FOL.map(f => f.id);
     if (m.to !== 'all') return [m.to];
-    const named = FOL.filter(f => new RegExp('\\b' + f.name + '\\b', 'i').test(m.text)).map(f => f.id);
-    return named.length ? named : FOL.map(f => f.id);
+    const ss = sentences(m.text).map(s => ({ s, q: isQuestion(s), voc: vocatives(s), all: EVERYONE.test(s) }));
+    const qs = ss.filter(x => x.q), ids = new Set();
+    if (qs.some(x => x.voc.size)) {
+      if (qs.some(x => !x.voc.size && x.all)) return all;   // "Mira, what do you have? Anyone else?"
+      qs.forEach(x => x.voc.forEach(id => ids.add(id)));
+    } else {
+      if (ss.some(x => x.all)) return all;
+      // "Theo, thanks. Anything else?" is still for Theo
+      const more = qs.some(x => /\b(else|more|another|other|rest)\b/i.test(x.s));
+      ss.filter(x => !x.q && (more || !ACK.test(x.s))).forEach(x => x.voc.forEach(id => ids.add(id)));
+    }
+    return ids.size ? all.filter(id => ids.has(id)) : all;
   }
   const quote = (t, n) => { t = String(t).replace(/\s+/g, ' ').trim().replace(/\.$/, ''); n = n || 90; return t.length > n ? t.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : t; };
   const listText = xs => (xs.length < 2 ? xs.join('') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1]);
@@ -109,6 +154,9 @@
   const OFFER = /\b(i have|i've got|i got|there's|there is|i also have)\s+(more|another|one more|something else|other|a couple more)|\bmore (on|about) (this|that|it)\b|\bif you (want|need) (it|them|more)\b|\bmore where that came from\b|\bask (me )?if you need\b/i;
   const MORE_REQ = /\b(more|else|rest|other|another|yes|go ahead|sure|send (it|them))\b/i;
   const REPEAT_ADVICE = 'Asking again makes teammates recite their reports a couple at a time, relevant or not; asking about the options still standing gets the decisive ones sooner.';
+  // Every decisive report out within this many requests counts as efficient (one per teammate).
+  const EFFICIENT_ASKS = FOL.length;
+  const NUM = ['no', 'one', 'two', 'three', 'four', 'five', 'six'];
 
   /**
    * Analyse one puzzle. messages: the chat ({ from: 'leader' | 'f1'…, to, text, t }); answers: [[5 credences] per question].
@@ -125,7 +173,7 @@
     const leaderMsgs = [], qList = [], heard = [], leaderToks = new Set();
     const surfaced = new Map(), offers = new Map(), lastTo = {};
     const askedAny = new Set(), askedDirect = new Set(), askedAbout = {};
-    let turns = 0;
+    let turns = 0, asksToAll = null;   // requests the leader had sent when the last decisive report came out
     messages.forEach((m, i) => {
       if (i && (m.from === 'leader') !== (messages[i - 1].from === 'leader')) turns++;
       if (m.from === 'leader') {
@@ -175,6 +223,7 @@
           if (critNums.has(n) && clueBy.get(n).holder === m.from && !surfaced.has(n)) {
             surfaced.set(n, m.from);
             if (lastTo[m.from]) lastTo[m.from].credited.push(n);
+            if (surfaced.size === critical.length) asksToAll = leaderMsgs.filter(x => x.qs.length).length;
           }
         });
         heard.push({ fid: m.from, toks: new Set(tokens(m.text)), nums: new Set(nums) });
@@ -195,7 +244,7 @@
       targeted: targeted.length, generic: generic.length, repeats: repeats.length,
       followUps: leaderMsgs.filter(x => x.followUp).length, connects: leaderMsgs.filter(x => x.connect).length,
       askedDirect: FOL.map(f => f.id).filter(id => askedDirect.has(id)), askedAny: FOL.map(f => f.id).filter(id => askedAny.has(id)),
-      offersIgnored: [...offers.keys()], surfacedNums: [...surfaced.keys()], missedNums: missed.map(c => c.num)
+      offersIgnored: [...offers.keys()], surfacedNums: [...surfaced.keys()], missedNums: missed.map(c => c.num), asksToAll
     };
 
     /* where the points went: hidden reports vs using the reports the leader had */
@@ -232,7 +281,13 @@
         const who = [...new Set(best.credited.map(n => surfaced.get(n)))].map(nameOf);
         good('best-ask', 3 + 2 * best.credited.length, `Your question “${quote(best.m.text)}” drew out ${best.credited.length === 1 ? 'decisive report' : 'decisive reports'} ${listText(best.credited.map(n => '#' + n))} from ${listText(who)}.`);
       }
-      if (critical.length && missed.length === 0) good('all-surfaced', 6, 'Every decisive report your teammates held came out.');
+      // getting everything out with a few requests is efficient, however broad they were
+      if (critical.length && missed.length === 0) {
+        const quick = asksToAll >= 1 && asksToAll <= EFFICIENT_ASKS;
+        good('all-surfaced', quick ? 7 : 6, quick
+          ? `Every decisive report your teammates held came out after just ${asksToAll === 1 ? 'one request' : NUM[asksToAll] + ' requests'} from you. Efficient: there was nothing left to ask.`
+          : 'Every decisive report your teammates held came out.');
+      }
       const conn = leaderMsgs.find(x => x.connect);
       if (conn) good('connect', 3 + metrics.connects, `You passed on what one teammate said to the others${metrics.connects > 1 ? ` ${metrics.connects} times` : ''}, for example “${quote(conn.m.text, 80)}”. Connecting reports is how hidden-profile puzzles get solved.`);
       if (metrics.askedDirect.length === FOL.length) good('all-asked', 2, 'You asked all three teammates directly.');
@@ -271,11 +326,13 @@
         else text += ` A question to ${nm} about ${opts[0]} would have found it.`;
         tip(rank ? 'missed-2' : 'missed', 2 + gp.stake / 4, text + ` (Worth ${Math.round(gp.stake)} points on Q${gp.qi + 1}.)`);
       });
-      if (repeats.length >= 2) {
+      // How the leader asked matters only if something stayed hidden: when every decisive report came out,
+      // broad or repeated requests did the job and the feedback doesn't suggest asking differently.
+      if (repeats.length >= 2 && missed.length) {
         const example = quote(repeats[0].text, 70);
         tip('repeats', 2 + repeats.length, `${repeats.length} of your questions repeated an earlier one to the same people, such as “${example}”. ${REPEAT_ADVICE}`).example = example;
       }
-      if (qList.length >= 2 && !targeted.length) {
+      if (qList.length >= 2 && !targeted.length && missed.length) {
         const opt = p.questions[0].options.find((o, k) => p.questions[0].answer.indexOf(k) < 0);
         tip('generic', 4, `All your questions were general, such as “${quote((generic[0] || qList[0]).text, 60)}”. Naming an option, for example asking who has anything on “${opt}”, tells teammates which report to look for.`);
       }
@@ -327,8 +384,10 @@
       targetedShare: sum('targeted') + sum('generic') ? sum('targeted') / (sum('targeted') + sum('generic')) : NaN,
       hidden: allQ.length ? S.mean(allQ.map(x => x.hidden)) : NaN, use: allQ.length ? S.mean(allQ.map(x => x.use)) : NaN,
       allAsked: team.filter(r => r.analysis.metrics.askedDirect.length === FOL.length).length,
-      allSurfaced: team.filter(r => r.analysis.metrics.critical && r.analysis.metrics.surfaced === r.analysis.metrics.critical).length
+      allSurfaced: team.filter(r => r.analysis.metrics.critical && r.analysis.metrics.surfaced === r.analysis.metrics.critical).length,
+      quickPuzzles: team.filter(r => quickDone(r.analysis.metrics)).length, puzzles: n
     };
+    const quickMax = Math.max(0, ...team.filter(r => quickDone(r.analysis.metrics)).map(r => r.analysis.metrics.asksToAll));
     // strongest instance of each kind of observation, labelled with its puzzle
     const best = tone => {
       const byKey = new Map();
@@ -343,7 +402,13 @@
     const goods = best('good'), tips = best('tip');
     // summary-level wording for patterns that recur across puzzles
     goods.forEach(o => {
-      if (o.key === 'all-surfaced') { o.text = `Every decisive report came out in ${totals.allSurfaced} of ${n} team puzzles.`; o.weight = 3 + 2 * totals.allSurfaced; o.puzzle = null; }
+      if (o.key === 'all-surfaced') {
+        const where = totals.allSurfaced < n ? `${totals.allSurfaced} of ${n} team puzzles` : n === 1 ? 'your team puzzle' : n === 2 ? 'both team puzzles' : `all ${n} team puzzles`;
+        const quick = totals.quickPuzzles === totals.allSurfaced;
+        const asks = quickMax === 1 ? 'one request' : NUM[quickMax] + ' requests';
+        o.text = `Every decisive report came out in ${where}` + (quick ? (totals.allSurfaced > 1 ? `, each time after at most ${asks}` : `, after just ${asks}`) + ' from you. Efficient.' : '.');
+        o.weight = 3 + 2 * totals.allSurfaced + (quick ? 1 : 0); o.puzzle = null;
+      }
       if (o.key === 'all-asked') { o.text = `You asked all three teammates directly in ${totals.allAsked} of ${n} team puzzles.`; o.weight = 1 + totals.allAsked; o.puzzle = null; }
       if (o.key === 'connect' && totals.connectsTotal > 1) o.weight += totals.connectsTotal;
     });
@@ -353,7 +418,41 @@
     const pick = (xs, k) => xs.sort((a, b) => b.weight - a.weight).slice(0, k);
     return { totals, strengths: pick(goods, 3), tips: pick(tips, 3) };
   }
+  const quickDone = m => m.critical > 0 && m.surfaced === m.critical && m.asksToAll >= 1 && m.asksToAll <= EFFICIENT_ASKS;
 
-  root.MEL_COACH = { tokens, words, vocab, optionMentions, reportNums, questionMention, sentences, isQuestion, audienceOf, ruledOut, bestWith, analyse, top, summarise };
+  /* ---------- the habits Study 2 linked to effective leaders, and a playful style ---------- */
+  const fmt1 = x => (isFinite(x) ? x.toFixed(1) : '–'), pctText = x => (isFinite(x) ? Math.round(100 * x) + '%' : '–');
+  /**
+   * The three habits, rated strong / some / little on rough thresholds for these puzzles (5–6 decisive hidden
+   * clues each), not norms. Specific questions count fully, general ones half and repeats not at all, so asking
+   * the same thing again earns nothing. When every decisive clue came out, fewer questions or follow-ups were
+   * enough: those rate 'efficient' rather than 'some' or 'little'. T: totals from summarise().
+   */
+  function habits(T) {
+    const rate = (v, strong, some) => (!isFinite(v) ? 'little' : v >= strong ? 'strong' : v >= some ? 'some' : 'little');
+    const complete = T.critical > 0 && T.surfaced === T.critical;
+    const enough = r => (complete && r !== 'strong' ? 'efficient' : r), ENOUGH = ' You drew out every decisive clue, so fewer was enough.';
+    const ask = enough(rate(T.targeted + 0.5 * T.generic, 4, 2)), back = enough(rate(T.followUps, 2, 1));
+    return [
+      { label: 'Asking questions', value: `${fmt1(T.targeted + T.generic)} per puzzle, ${pctText(T.targetedShare)} specific`, rating: ask, note: 'Leaders who asked more questions got better results, with AI and with human teams. Specific questions count fully here, general ones half, repeats not at all.' + (ask === 'efficient' ? ENOUGH : '') },
+      { label: 'Back-and-forth', value: `${fmt1(T.followUps)} follow-ups per puzzle`, rating: back, note: 'More conversational turn-taking went with better team results. Here it counts the times you built on what a teammate said.' + (back === 'efficient' ? ENOUGH : '') },
+      { label: 'Drawing out hidden clues', value: `${T.surfaced} of ${T.critical} decisive clues`, rating: rate(T.critical ? T.surfaced / T.critical : NaN, 0.75, 0.4), note: 'Weak leaders learned little from their team: their answers looked like uninformed guesses.' }
+    ];
+  }
+  /** A playful leadership style from the habits: { name, text }. */
+  function leaderStyle(hb, T) {
+    const [q, t, i] = hb.map(x => x.rating), general = !(T.targetedShare >= 0.35);
+    const complete = T.critical > 0 && T.surfaced === T.critical;
+    if (i === 'strong' && (q === 'strong' || t === 'strong') && !general) return { name: 'The Facilitator', text: 'You asked specific questions, built on the answers and pulled out what each teammate knew. That is the pattern Study 2 linked to the most effective leaders.' };
+    if (i === 'strong' && complete) return { name: 'The Collector', text: (general ? 'You drew out every hidden clue by asking the team broadly.' : 'You drew out every hidden clue with well-aimed questions.') +
+      (T.quickPuzzles === T.puzzles ? ' It took only a few requests: efficient, with nothing left to ask.' : ' That is the heart of leading a hidden-profile team.') };
+    if (i === 'strong') return { name: 'The Collector', text: general ? 'You got most of the hidden clues out by asking for everything at once. For the last few, ask about the options still standing.' : 'You got most of the hidden clues out with few questions. Building on what teammates say would surface the rest.' };
+    if (T.repeats >= 1.5) return { name: 'The Broadcaster', text: 'You asked the team for everything, often more than once. Teammates share a couple of reports at a time, so specific follow-ups would have drawn out more.' };
+    if (q === 'strong' || t === 'strong') return { name: 'The Explorer', text: 'You kept the conversation going, but some decisive clues stayed hidden. Ask each teammate directly about the options still standing.' };
+    if (i === 'little' && q === 'little') return { name: 'The Lone Solver', text: 'You leaned on your own clues. Most decisive clues sat with your teammates, so draw them out before you decide.' };
+    return { name: 'The Coordinator', text: 'You kept the team moving and got part of the picture. A few more follow-up questions would surface the rest.' };
+  }
+
+  root.MEL_COACH = { tokens, words, vocab, optionMentions, reportNums, questionMention, sentences, isQuestion, vocatives, audienceOf, ruledOut, bestWith, analyse, top, summarise, habits, leaderStyle };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.MEL_COACH;
 })(typeof window !== 'undefined' ? window : globalThis);

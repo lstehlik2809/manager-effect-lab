@@ -305,6 +305,7 @@ footer { border-top: 1px solid var(--rule); padding-block: 22px 40px; color: var
 .length-cards .engine { grid-template-columns: 86px minmax(0, 1fr); align-items: baseline; gap: 2px 10px; padding: 9px 14px; }
 .btn.start-btn { min-height: 46px; padding-inline: 22px; font-size: 1rem; }
 .hero-start { gap: 8px 14px; }
+.note.resume { display: grid; gap: 10px; padding: 12px 14px; font-size: .95rem; }
 @media (min-width: 900px) { .hero-start { display: none; } }
 /* on phones the masthead blurb repeats the test's own intro and pushes the start below the fold */
 @media (max-width: 600px) { .brand p { display: none; } }

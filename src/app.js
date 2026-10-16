@@ -785,10 +785,11 @@
       AI.notice ? h('p', { class: 'note warn', id: 'ai-notice' }, AI.notice) : '',
       h('div', { class: 'btn-row' }, startBtn(),
         last ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''),
-      h('p', { class: 'small muted' }, free ? 'No sign-up and no key. ' : '', 'You can stop after any team puzzle and still get your result.'),
+      h('p', { class: 'small muted' }, free ? 'No sign-up and no key. ' : '', 'You can stop after any team puzzle and still get your result. If you leave mid-test, your progress is saved in this browser and you can resume.'),
       more);
     put(root,
       h('div', { class: 'section-head' }, h('div', { class: 'eyebrow' }, 'Leadership test · inspired by Study 2'), h('h2', {}, 'How well do you lead a team?'),
+        resumeBox(),
         h('p', {}, 'In a 2025 study, how well people led a team of AI agents strongly predicted how much they improved real human teams. Try a version of that test. You lead three AI teammates, Mira, Theo and Jonas, through hidden-profile puzzles. Each of you holds different clues and nobody can solve a puzzle alone, so your job is to draw out the right information, keep the team on track, and decide.'),
         // on a phone the set-up panel is far down; offer the start right here
         h('div', { class: 'btn-row hero-start' }, startBtn(), h('a', { href: '#ai-setup', class: 'small', onclick: e => { e.preventDefault(); $('#ai-setup').scrollIntoView({ behavior: 'smooth' }); } }, 'Choose length and teammates'),
@@ -914,6 +915,100 @@
     } catch (e) { el.textContent = await apiErrorText(e); }
   }
 
+  /* ---- unfinished tests: saved as you play, so a reload, a closed tab or "Save and exit" can resume ---- */
+  const PROGRESS_DAYS = 7;
+  function saveProgress() {
+    if (AI.phase !== 'puzzle' && AI.phase !== 'feedback') return;
+    const c = AI.phase === 'puzzle' ? AI.cur : null;
+    if (c && c.paused) return;
+    store.set('ai.progress', {
+      v: PZ.VERSION, savedAt: Date.now(), order: AI.order, idx: AI.idx, phase: AI.phase, results: AI.results,
+      // the clock stops while the player is away: only the time used so far is kept
+      cur: c && { id: c.puzzle.id, used: Date.now() - c.startedAt, mins: c.mins, locked: c.locked, messages: c.messages, seq: c.seq, to: c.to, draft: c.draft,
+        answers: c.answers, out: c.out, engine: c.engine, shared: Object.fromEntries(FOL.map(f => [f.id, [...c.followers[f.id].shared]])),
+        // teammates still typing lose their reply if the page closes, so they are asked again on resume
+        pending: FOL.map(f => f.id).filter(id => c.followers[id].busy || c.followers[id].queued) }
+    });
+    if (c) c.savedAt = Date.now();
+  }
+  function loadProgress() {
+    const pr = store.get('ai.progress', null);
+    if (!pr) return null;
+    const ok = pr.v === PZ.VERSION && Array.isArray(pr.order) && pr.order.length && Date.now() - pr.savedAt < PROGRESS_DAYS * 864e5 &&
+      (pr.phase === 'feedback' ? Array.isArray(pr.results) && pr.results.length : pr.cur && PZ.PUZZLES.some(p => p.id === pr.cur.id));
+    if (!ok) { store.del('ai.progress'); return null; }
+    return pr;
+  }
+  const clearProgress = () => store.del('ai.progress');
+  function engineReady(e) {
+    if (e === 'scripted') return true;
+    if (e === 'hosted') return !inClaude && !!HOSTED_URL;
+    if (e === 'claude') return inClaude && AI.sampleState === 'ready';
+    if (e === 'gemini') return !inClaude && !!AI.settings.geminiKey;
+    if (e === 'api') return !inClaude && !!AI.settings.apiKey;
+    return false;
+  }
+  function resumeTest() {
+    const pr = loadProgress();
+    if (!pr) { renderIntro(); return; }
+    AI.notice = '';
+    AI.order = pr.order; AI.idx = pr.idx; AI.results = pr.results || [];
+    if (pr.phase === 'feedback') { AI.phase = 'feedback'; AI.render(); window.scrollTo(0, 0); return; }
+    const s = pr.cur, p = PZ.PUZZLES.find(x => x.id === s.id), startedAt = Date.now() - (+s.used || 0);
+    let engine = s.engine, note = '';
+    if (!engineReady(engine)) {
+      engine = engineReady('hosted') ? 'hosted' : 'scripted';
+      note = ` Your earlier teammates are not available here, so ${engine === 'hosted' ? 'live AI' : 'scripted'} teammates take over.`;
+    }
+    AI.cur = {
+      puzzle: p, startedAt, mins: s.mins, deadline: s.mins ? startedAt + s.mins * 60000 : null, locked: !!s.locked,
+      messages: s.messages || [], seq: s.seq || 0, to: s.to || 'all', draft: s.draft || '', confirm: false, timer: null,
+      answers: s.answers, out: s.out,
+      followers: Object.fromEntries(FOL.map(f => [f.id, { busy: false, queued: false, ctl: null, shared: new Set((s.shared || {})[f.id] || []), bubble: null }])),
+      engine
+    };
+    AI.phase = 'puzzle';
+    AI.render();
+    window.scrollTo(0, 0);
+    if (!p.solo) addSys('Welcome back. The clock was paused while you were away.' + note);
+    tick();
+    if (!AI.cur.locked) (s.pending || []).forEach(requestReply);
+    saveProgress();
+  }
+  /** Leave mid-puzzle without losing anything: the test can be resumed from the start screen. */
+  function exitTest() {
+    const c = AI.cur;
+    if (c && AI.phase === 'puzzle') {
+      saveProgress();   // before cancelling replies still on their way, so they count as pending
+      c.paused = true; clearTimeout(c.timer);
+      for (const f of Object.values(c.followers)) { f.queued = false; if (f.ctl) f.ctl.abort(); }
+    }
+    AI.phase = 'intro'; AI.render(); window.scrollTo(0, 0);
+  }
+  const ago = ms => { const m = Math.round(ms / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' days ago'; };
+  function resumeBox() {
+    const pr = loadProgress();
+    if (!pr) return '';
+    const title = id => (PZ.PUZZLES.find(p => p.id === id) || { title: '' }).title, of = `${pr.idx + 1} of ${pr.order.length}`;
+    let text;
+    if (pr.phase === 'feedback') text = `You finished puzzle ${of}, ${title(pr.order[pr.idx])}` + (pr.idx + 1 < pr.order.length ? `; next up is ${title(pr.order[pr.idx + 1])}.` : '.');
+    else {
+      const left = pr.cur.mins ? Math.max(0, pr.cur.mins * 60 - Math.round(pr.cur.used / 1000)) : null;
+      text = `Puzzle ${of}, ${title(pr.cur.id)}` + (pr.cur.messages.length ? `, with your chat so far` : '') + '. ' +
+        (pr.cur.locked ? 'Time was up; your answers are waiting to be submitted.' : left != null ? `The clock is paused at ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}.` : 'No time limit.');
+    }
+    const waiting = pr.cur && pr.cur.engine === 'claude' && AI.sampleState === 'checking';
+    return h('div', { class: 'note good resume', id: 'ai-resume' },
+      h('p', {}, h('strong', {}, 'Pick up where you left off. '), text, h('span', { class: 'muted' }, ` Saved ${ago(Date.now() - pr.savedAt)}.`)),
+      h('div', { class: 'btn-row' },
+        h('button', { class: 'btn primary', type: 'button', disabled: waiting || null, onclick: resumeTest }, waiting ? 'Checking Claude…' : 'Resume test'),
+        h('button', { class: 'btn quiet', type: 'button', onclick: () => { clearProgress(); renderIntro(); } }, 'Discard and start over')));
+  }
+  // save the clock when the page is hidden or closed (switching apps on a phone, closing the tab)
+  const saveOnLeave = () => { if (AI.phase === 'puzzle' && AI.cur && !AI.cur.paused) saveProgress(); };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveOnLeave(); });
+  window.addEventListener('pagehide', saveOnLeave);
+
   function startTest() {
     const st = AI.settings;
     AI.notice = '';
@@ -931,7 +1026,7 @@
     const p = PZ.PUZZLES.find(x => x.id === AI.order[AI.idx]);
     const mins = p.solo ? (AI.settings.minutes ? 4 : 0) : AI.settings.minutes;
     AI.cur = {
-      puzzle: p, startedAt: Date.now(), deadline: mins ? Date.now() + mins * 60000 : null, locked: false,
+      puzzle: p, startedAt: Date.now(), mins, deadline: mins ? Date.now() + mins * 60000 : null, locked: false,
       messages: [], seq: 0, to: 'all', draft: '', confirm: false, timer: null,
       answers: p.questions.map(() => [20, 20, 20, 20, 20]), out: p.questions.map(() => [false, false, false, false, false]),
       followers: Object.fromEntries(FOL.map(f => [f.id, { busy: false, queued: false, ctl: null, shared: new Set(), bubble: null }])),
@@ -941,18 +1036,20 @@
     AI.render();
     window.scrollTo(0, 0);
     tick();
+    saveProgress();
   }
 
   function elapsed() { return Math.round((Date.now() - AI.cur.startedAt) / 1000); }
   function tick() {
-    const c = AI.cur; if (!c || AI.phase !== 'puzzle') return;
+    const c = AI.cur; if (!c || AI.phase !== 'puzzle' || c.paused) return;
     clearTimeout(c.timer);
     const el = $('#ai-timer');
     if (c.deadline) {
       const left = Math.max(0, c.deadline - Date.now());
       if (el) { el.textContent = Math.floor(left / 60000) + ':' + String(Math.floor(left / 1000) % 60).padStart(2, '0'); el.classList.toggle('low', left < 60000); }
-      if (left <= 0 && !c.locked) { lockChat('Time is up. Submit your answers.'); return; }
+      if (left <= 0 && !c.locked) { lockChat('Time is up. Submit your answers.'); saveProgress(); return; }
     } else if (el) { const e = elapsed(); el.textContent = Math.floor(e / 60) + ':' + String(e % 60).padStart(2, '0'); }
+    if (!c.locked && Date.now() - (c.savedAt || 0) > 5000) saveProgress();   // keep the paused clock close to the truth
     c.timer = setTimeout(tick, 250);
   }
   function lockChat(msg) {
@@ -979,7 +1076,7 @@
     const top = h('div', { class: 'ai-top' },
       h('div', {}, h('div', { class: 'eyebrow' }, `Puzzle ${pos} of ${total}`), h('h2', {}, p.title)),
       h('div', { class: 'btn-row' }, h('span', { class: 'timer', id: 'ai-timer', 'aria-live': 'off' }, '–:––'),
-        h('button', { class: 'btn quiet', type: 'button', onclick: () => { lockChat(); AI.phase = 'intro'; AI.render(); } }, 'Quit test')));
+        h('button', { class: 'btn quiet', type: 'button', title: 'Your progress is saved. Resume from the start screen, now or later.', onclick: exitTest }, 'Save and exit')));
     let middle = '';
     if (!p.solo) middle = renderChat();
     put(root, top, h('div', { class: 'ai-grid' + (p.solo ? ' solo' : '') }, brief, middle, answers));
@@ -1034,11 +1131,12 @@
     c.messages.push(m);
     $('#msgs').append(msgEl(m)); scrollChat();
     (c.to === 'all' ? FOL.map(f => f.id) : [c.to]).forEach(requestReply);
+    saveProgress();
   }
 
   function requestReply(fid) {
     const c = AI.cur, st = c.followers[fid];
-    if (c.locked) return;
+    if (c.locked || c.paused) return;
     if (st.busy) { st.queued = true; return; }
     st.busy = true;
     const bubbleText = h('span', {}, 'typing…');
@@ -1074,7 +1172,9 @@
       })
       .finally(() => {
         st.busy = false; st.ctl = null;
-        if (st.queued && !c.locked && AI.cur === puzzleAt) { st.queued = false; requestReply(fid); }
+        if (AI.cur !== puzzleAt || c.paused) return;
+        if (st.queued && !c.locked) { st.queued = false; requestReply(fid); }
+        if (AI.phase === 'puzzle') saveProgress();
       });
   }
   function cleanReply(text, fid) {
@@ -1230,10 +1330,10 @@
         q.options.map((o, k) => h('div', { class: 'opt' + (c.out[qi][k] ? ' out' : '') },
           h('span', { class: 'name' }, L[k] + '. ' + o),
           h('input', { type: 'number', min: 0, max: 100, step: 1, value: c.answers[qi][k], 'aria-label': `Percent for ${o}`, id: `ans-${qi}-${k}`,
-            oninput: e => { c.answers[qi][k] = Math.max(0, Math.min(100, +e.target.value || 0)); updateSums(); } }),
+            oninput: e => { c.answers[qi][k] = Math.max(0, Math.min(100, +e.target.value || 0)); updateSums(); saveProgress(); } }),
           h('button', { class: 'x', type: 'button', 'aria-pressed': c.out[qi][k] ? 'true' : 'false', 'aria-label': `Rule out ${o}`, title: 'Rule out',
-            onclick: () => { c.out[qi][k] = !c.out[qi][k]; evenSplit(qi); renderAnswers(); } }, '✕'))),
-        h('div', { class: 'sum', id: `sum-${qi}` }, h('span', {}, `Total ${sum}%`), h('button', { class: 'btn quiet', type: 'button', onclick: () => { evenSplit(qi); renderAnswers(); } }, 'Even split')));
+            onclick: () => { c.out[qi][k] = !c.out[qi][k]; evenSplit(qi); renderAnswers(); saveProgress(); } }, '✕'))),
+        h('div', { class: 'sum', id: `sum-${qi}` }, h('span', {}, `Total ${sum}%`), h('button', { class: 'btn quiet', type: 'button', onclick: () => { evenSplit(qi); renderAnswers(); saveProgress(); } }, 'Even split')));
     });
     put(box,
       h('div', { class: 'panel-head' }, h('h3', {}, 'Your answer'), h('span', { class: 'small muted' }, 'Rule options out with ✕')),
@@ -1264,6 +1364,7 @@
     const analysis = COACH.analyse(p, c.messages, c.answers, { timeLeft });
     AI.results.push({ id: p.id, version: PZ.VERSION, title: p.title, solo: !!p.solo, scores, flat, answers: c.answers.map(a => a.slice()), seconds: elapsed(), metrics: p.solo ? null : analysis.metrics, analysis, transcript: c.messages.slice(), engine: c.engine, model: c.engine === 'api' ? AI.settings.model : (c.engine === 'gemini' || c.engine === 'hosted') ? LLM.GEMINI_MODEL : null });
     AI.phase = 'feedback';
+    saveProgress();
     AI.render();
     window.scrollTo(0, 0);
   }
@@ -1343,6 +1444,7 @@
   function finishTest() {
     AI.phase = 'summary';
     store.set('ai.last', { results: AI.results, name: AI.settings.name, when: new Date().toISOString() });
+    clearProgress();
     AI.render();
     window.scrollTo(0, 0);
   }
@@ -1363,28 +1465,9 @@
   }
   /* ---- results: habits, a playful style, and a card to share ---- */
   const APP_URL = 'https://lstehlik2809.github.io/manager-effect-lab/';
-  const RATING = { strong: 'Strong', some: 'Some', little: 'Little' };
-  const pctText = x => (isFinite(x) ? Math.round(100 * x) + '%' : '–');
-  // Rough thresholds for these puzzles (5–6 decisive hidden clues each), not norms. Specific questions
-  // count fully, general ones half and repeats not at all, so asking the same thing again earns nothing.
-  function habits(N) {
-    const rate = (v, strong, some) => (!isFinite(v) ? 'little' : v >= strong ? 'strong' : v >= some ? 'some' : 'little');
-    const info = N.critical ? N.surfaced / N.critical : NaN;
-    return [
-      { label: 'Asking questions', value: `${fmt(N.targeted + N.generic, 1)} per puzzle, ${pctText(N.targetedShare)} specific`, rating: rate(N.targeted + 0.5 * N.generic, 4, 2), note: 'Leaders who asked more questions got better results, with AI and with human teams. Specific questions count fully here, general ones half, repeats not at all.' },
-      { label: 'Back-and-forth', value: `${fmt(N.followUps, 1)} follow-ups per puzzle`, rating: rate(N.followUps, 2, 1), note: 'More conversational turn-taking went with better team results. Here it counts the times you built on what a teammate said.' },
-      { label: 'Drawing out hidden clues', value: `${N.surfaced} of ${N.critical} decisive clues`, rating: rate(info, 0.75, 0.4), note: 'Weak leaders learned little from their team: their answers looked like uninformed guesses.' }
-    ];
-  }
-  function leaderStyle(hb, N) {
-    const [q, t, i] = hb.map(x => x.rating), general = !(N.targetedShare >= 0.35);
-    if (i === 'strong' && (q === 'strong' || t === 'strong') && !general) return { name: 'The Facilitator', text: 'You asked specific questions, built on the answers and pulled out what each teammate knew. That is the pattern Study 2 linked to the most effective leaders.' };
-    if (i === 'strong') return { name: 'The Collector', text: general ? 'You got most of the hidden clues out, mostly by asking for everything at once. Questions about the options still standing get there faster.' : 'You got most of the hidden clues out with few questions. Building on what teammates say would make it quicker and surer.' };
-    if (N.repeats >= 1.5) return { name: 'The Broadcaster', text: 'You asked the team for everything, often more than once. Teammates share a couple of reports at a time, so specific follow-ups would have drawn out more.' };
-    if (q === 'strong' || t === 'strong') return { name: 'The Explorer', text: 'You kept the conversation going, but some decisive clues stayed hidden. Ask each teammate directly about the options still standing.' };
-    if (i === 'little' && q === 'little') return { name: 'The Lone Solver', text: 'You leaned on your own clues. Most decisive clues sat with your teammates, so draw them out before you decide.' };
-    return { name: 'The Coordinator', text: 'You kept the team moving and got part of the picture. A few more follow-up questions would surface the rest.' };
-  }
+  // habit ratings and the playful style come from src/coach.js (habits, leaderStyle)
+  const RATING = { strong: 'Strong', efficient: 'Efficient', some: 'Some', little: 'Little' };
+  const goodRating = r => r === 'strong' || r === 'efficient';
   function shareText(N, style) {
     return `I just led a team of AI agents through ${N.team.length} hidden-profile puzzles: team score ${Math.round(N.teamScore)}/100, ${N.surfaced} of ${N.critical} hidden clues surfaced, leadership style "${style.name}". ` +
       `It's a playful test inspired by Weidmann, Xu & Deming's research on measuring leadership with AI agents. Try it: ${APP_URL}`;
@@ -1416,7 +1499,7 @@
       const y = 394 + k * 48;
       g.fillStyle = ink; g.font = body('600 25px'); g.fillText(x.label, 88, y);
       g.fillStyle = ink2; g.font = body('400 23px'); g.fillText(x.value, 480, y);
-      g.fillStyle = x.rating === 'strong' ? pos : ink2; g.font = body('700 23px'); g.textAlign = 'right'; g.fillText(RATING[x.rating], W - 88, y); g.textAlign = 'left';
+      g.fillStyle = goodRating(x.rating) ? pos : ink2; g.font = body('700 23px'); g.textAlign = 'right'; g.fillText(RATING[x.rating], W - 88, y); g.textAlign = 'left';
     });
     g.fillStyle = ink2; g.font = body('400 18px'); g.fillText('A playful test inspired by Weidmann, Xu & Deming (2025). Not a validated assessment.', 88, 538);
     g.fillStyle = accent; g.font = body('600 20px'); g.fillText('Try it: ' + APP_URL.replace(/^https:\/\//, '').replace(/\/$/, ''), 88, 570);
@@ -1451,7 +1534,7 @@
     const head = h('div', { class: 'section-head' }, h('div', { class: 'eyebrow' }, 'Your result' + (name ? ' · ' + name : '')), h('h2', {}, 'How you led your AI team'));
     const again = h('button', { class: 'btn quiet', type: 'button', onclick: () => { AI.phase = 'intro'; AI.render(); } }, 'Take the test again');
     if (!N.team.length) { put(root, head, h('div', { class: 'panel' }, h('p', {}, 'Complete the team puzzles to see a result.'), again)); return; }
-    const hb = habits(N), style = leaderStyle(hb, N);
+    const hb = COACH.habits(N), style = COACH.leaderStyle(hb, N);
     const pct = N.nq ? Math.round(100 * N.solved / N.nq) : 0;
     const range = rangeText(N);
     const toGroup = e => { e.preventDefault(); AI.phase = 'intro'; AI.render(); setTimeout(() => { const w = $('#ai-group-wrap'); if (w) { w.open = true; w.scrollIntoView({ behavior: 'smooth' }); } }, 30); };
@@ -1474,7 +1557,7 @@
         h('div', { class: 'habits' }, hb.map(x => h('div', { class: 'habit' },
           h('div', {}, h('strong', {}, x.label), h('p', { class: 'small muted' }, x.note)),
           h('span', { class: 'mono' }, x.value),
-          h('span', { class: 'pill ' + (x.rating === 'strong' ? 'pos' : '') }, h('span', { class: 'dot' }), RATING[x.rating])))),
+          h('span', { class: 'pill ' + (goodRating(x.rating) ? 'pos' : '') }, h('span', { class: 'dot' }), RATING[x.rating])))),
         h('p', { class: 'small' }, `You wrote about ${fmt(N.words, 0)} words per puzzle. In the study, the amount of talking made no difference; asking and listening did.`),
         h('p', { class: 'verdict small' }, interpret(N))),
       h('div', { class: 'panel flow' },

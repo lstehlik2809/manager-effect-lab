@@ -53,8 +53,8 @@
     const incoming = messages.slice(lastOwn + 1).filter(m => m.from === 'leader' && (m.to === 'all' || m.to === fid));
     if (!incoming.length) return '';
     const latest = incoming[incoming.length - 1], direct = incoming.some(m => m.to === fid);
-    const named = PZ.FOLLOWERS.filter(f => new RegExp('\\b' + f.name + '\\b', 'i').test(latest.text)).map(f => f.id);
-    if (!direct && named.length && !named.includes(fid)) return '';   // meant for someone else
+    // addressed to someone else by name ("Theo, …"); merely mentioning Theo is still for everyone
+    if (!direct && !C.audienceOf(latest).includes(fid)) return '';
     const text = incoming.map(m => m.text).join('\n');
     const mine = PZ.cluesFor(p, fid).slice().sort((a, b) => (a.holder === 'public') - (b.holder === 'public'));
     const v = C.vocab(p);

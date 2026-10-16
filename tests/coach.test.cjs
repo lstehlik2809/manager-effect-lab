@@ -38,15 +38,77 @@ check('questions are found with or without a question mark', () => {
   assert(!C.isQuestion('Please submit when ready'));
 });
 
-check('repeated general requests earn no extra credit and are named in the feedback', () => {
-  const msgs = play(t1, [['all', 'Please share all your reports.'], ['all', 'Please share all your reports.'], ['all', 'Share all your reports please'], ['all', 'Please share all your reports.']]);
+check('repeated general requests earn no extra credit and are named in the feedback while reports stay hidden', () => {
+  const msgs = play(t1, [['f1', 'Please share all your reports.'], ['f1', 'Please share all your reports.'], ['f1', 'Share all your reports please'], ['f1', 'Please share all your reports.']]);
   const a = C.analyse(t1, msgs, even);
   assert.strictEqual(a.metrics.questions, 4);
   assert.strictEqual(a.metrics.repeats, 3, 'repeats ' + a.metrics.repeats);
   assert.strictEqual(a.metrics.targeted, 0);
   assert.strictEqual(a.metrics.generic, 1);
+  assert(a.metrics.missedNums.length > 0, 'Theo and Jonas were never asked');
   const keys = a.observations.map(o => o.key);
   assert(keys.includes('repeats') && keys.includes('generic'), keys.join(','));
+});
+
+check('broad requests that draw out every decisive report are praised as efficient, not second-guessed', () => {
+  const t3 = PZ.PUZZLES.find(p => p.id === 't3');
+  const results = [t1, t3].map(p => {
+    const msgs = play(p, [['all', 'Please share all your reports.'], ['all', 'Please share all your reports.']]);
+    const a = C.analyse(p, msgs, even);
+    assert.strictEqual(a.metrics.surfaced, a.metrics.critical, p.id + ': two broad requests draw out everything from the scripted teammates');
+    assert.strictEqual(a.metrics.asksToAll, 2, p.id + ' asksToAll ' + a.metrics.asksToAll);
+    const all = a.observations.find(o => o.key === 'all-surfaced');
+    assert(all && /after just two requests/.test(all.text) && /Efficient/.test(all.text), all && all.text);
+    assert(!a.observations.some(o => ['generic', 'repeats', 'missed', 'offer', 'early'].includes(o.key)), a.observations.map(o => o.key).join(','));
+    return { title: p.title, solo: false, analysis: a };
+  });
+  const S = C.summarise(results), hb = C.habits(S.totals), style = C.leaderStyle(hb, S.totals);
+  assert(/both team puzzles, each time after at most two requests/.test(S.strengths.find(o => o.key === 'all-surfaced').text), S.strengths.map(o => o.text).join(' | '));
+  assert(!S.tips.some(o => ['generic', 'repeats'].includes(o.key)), S.tips.map(o => o.key).join(','));
+  assert.deepStrictEqual(hb.map(x => x.rating), ['efficient', 'efficient', 'strong']);
+  const said = [style.text].concat(S.tips.map(o => o.text), hb.map(x => x.note)).join(' ');
+  assert(!/faster|sooner|quicker|would have|options still standing/i.test(said), said);
+  assert(/efficient/i.test(style.text), style.text);
+  // with something still hidden, the advice to ask about the options still standing returns
+  const part = C.habits(Object.assign({}, S.totals, { surfaced: S.totals.critical - 1 }));
+  assert(part.slice(0, 2).every(x => x.rating !== 'efficient'), part.map(x => x.rating).join(','));
+});
+
+check('a message to everyone that mentions a teammate is not a question to that teammate', () => {
+  const aud = text => C.audienceOf({ from: 'leader', to: 'all', text }).join(',');
+  const ALL = 'f1,f2,f3';
+  // mentioned, not addressed
+  assert.strictEqual(aud('Theo mentioned the label applicator jams when bottles are wet. Were the bottles dry?'), ALL);
+  assert.strictEqual(aud('Theo said it only jams with wet bottles - does anyone know if they were dry?'), ALL);
+  assert.strictEqual(aud('What did Theo say about the applicator?'), ALL);
+  assert.strictEqual(aud('Do you agree with Theo?'), ALL);
+  assert.strictEqual(aud('Is Theo\'s report about the update?'), ALL);
+  assert.strictEqual(aud('Can someone ask Theo about it?'), ALL);
+  assert.strictEqual(aud('Thanks Theo. Were the bottles dry?'), ALL);
+  assert.strictEqual(aud('Mira, what do you have? Anyone else?'), ALL);
+  // addressed
+  assert.strictEqual(aud('Theo, what do you have on the label applicator?'), 'f2');
+  assert.strictEqual(aud('What do you have on the label applicator, Theo?'), 'f2');
+  assert.strictEqual(aud('Hi Theo! Anything on the software update?'), 'f2');
+  assert.strictEqual(aud('Theo what do you have?'), 'f2');
+  assert.strictEqual(aud('Jonas were the bottles dry?'), 'f3');
+  assert.strictEqual(aud('What about you Theo?'), 'f2');
+  assert.strictEqual(aud('@Jonas can you check the dry bottles report'), 'f3');
+  assert.strictEqual(aud('Theo, thanks. Anything else?'), 'f2');
+  assert.strictEqual(aud('Thanks Theo! Mira, what about the capping head?'), 'f1');
+  assert.strictEqual(aud('Mira and Jonas, anything on the vision sensor?'), 'f1,f3');
+  assert.strictEqual(aud('Hi team, Theo what do you have?'), 'f2');
+  assert.strictEqual(C.audienceOf({ from: 'leader', to: 'f1', text: 'Theo said so. Agree?' }).join(','), 'f1');
+
+  // the feedback: a broadcast that mentions Theo reaches everyone and is not a direct question to Theo
+  const msgs = play(t1, [['f2', 'Theo, anything on the label applicator?'], ['all', 'Theo said the label applicator jams when bottles are wet. Were the bottles dry when they reached it?']]);
+  const a = C.analyse(t1, msgs, even);
+  assert.deepStrictEqual(a.metrics.askedDirect, ['f2']);
+  assert.deepStrictEqual(a.metrics.askedAny, ['f1', 'f2', 'f3']);
+  assert.strictEqual(a.metrics.broadcast, 1);
+  assert(a.metrics.surfacedNums.includes(DRY), 'Jonas answered the broadcast: ' + a.metrics.surfacedNums.join(','));
+  // and the scripted teammates answer it rather than leaving it to Theo
+  assert(SCR.reply(t1, 'f3', [{ from: 'leader', to: 'all', text: 'Theo said the label applicator jams when bottles are wet. Were the bottles dry?' }], new Set()).includes('#' + DRY));
 });
 
 check('the same general question to different people is not a repeat', () => {
@@ -136,7 +198,7 @@ check('summary: specific strengths and tips across puzzles; repeating a request 
     { p: t1, script: [['all', 'Hi team, what do you have on question 1?'], ['f2', 'Theo, anything on the label applicator?'], ['f3', 'Jonas, were the bottles dry?'], ['all', 'Anything on operator error or manual mode?']] },
     { p: t3, script: [['all', 'Who has anything on Bruno or the forklift certificate?'], ['f2', 'Theo, what about Daria and Emil?'], ['all', 'When is the fire inspection?']] }
   ].map(x => ({ title: x.p.title, solo: false, analysis: C.analyse(x.p, play(x.p, x.script), even) }));
-  const spam = [t1, t3].map(p => ({ title: p.title, solo: false, analysis: C.analyse(p, play(p, [['all', 'Share everything.'], ['all', 'Share everything.'], ['all', 'Share everything.']]), even) }));
+  const spam = [t1, t3].map(p => ({ title: p.title, solo: false, analysis: C.analyse(p, play(p, [['f1', 'Share everything.'], ['f1', 'Share everything.'], ['f1', 'Share everything.']]), even) }));
   const G = C.summarise(good), X = C.summarise(spam);
   assert(G.strengths.length >= 1 && X.tips.length >= 1);
   assert(X.tips.some(o => o.key === 'repeats') && /Across the test, 4 of your questions repeated/.test(X.tips.find(o => o.key === 'repeats').text), X.tips.map(o => o.text).join(' | '));
