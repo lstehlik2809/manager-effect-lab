@@ -2395,6 +2395,8 @@ HOW TO TAKE PART
     { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', note: 'faster · cheaper' },
     { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', note: 'fastest · cheapest' }
   ];
+  // The same app published on claude.ai, where teammates run on the viewer's own Claude account (no key).
+  const CLAUDE_URL = 'https://claude.ai/artifact/696yvnhLNTxw2zjFXYXz42';
   const FOL = PZ.FOLLOWERS;
   const folName = id => (FOL.find(f => f.id === id) || { name: 'You' }).name;
 
@@ -2490,6 +2492,7 @@ HOW TO TAKE PART
           h('p', { class: 'small muted' }, 'Scores run from 0 to 100 (100 = exactly the right distribution; an even split scores 20–60). Everything runs in your browser; nothing is stored on a server.')),
         h('div', { class: 'panel flow' }, h('h3', {}, 'Set up'),
           h('div', { class: 'field' }, h('label', {}, 'Teammates'), engines),
+          inClaude ? '' : h('p', { class: 'note good small' }, h('strong', {}, 'Have a Claude account? '), 'Take the test in the ', h('a', { href: CLAUDE_URL, target: '_blank', rel: 'noopener' }, 'claude.ai version'), ' instead. Its teammates run on your own Claude account, so you need no API key.'),
           apiBox,
           h('div', { class: 'field' }, h('label', { for: 'ai-warm' }, 'Length'), warmSel,
             h('span', { class: 'hint' }, 'Standard: 1 warm-up and 4 team puzzles. Extended adds 2 warm-ups for a more precise skill control when comparing a group.')),
@@ -3156,7 +3159,8 @@ HOW TO TAKE PART
         h('div', { class: 'panel-head' }, h('h3', {}, 'Share your result'), h('p', {}, 'Image sized for a LinkedIn post')),
         cardBox,
         h('div', { class: 'btn-row' },
-          h('button', { class: 'btn primary', type: 'button', onclick: () => { copyText(text, shareStatus, 'Text copied. Paste it into your post.'); window.open('https://www.linkedin.com/sharing/share-offsite/?url=' + encodeURIComponent(APP_URL), '_blank', 'noopener'); } }, 'Share on LinkedIn'),
+          // a real link: scripted pop-ups are blocked for most viewers of the claude.ai version
+          h('a', { class: 'btn primary', href: 'https://www.linkedin.com/sharing/share-offsite/?url=' + encodeURIComponent(APP_URL), target: '_blank', rel: 'noopener', onclick: () => { copyText(text, shareStatus, 'Text copied. Paste it into your post.'); } }, 'Share on LinkedIn'),
           h('button', { class: 'btn', type: 'button', onclick: () => { if (canvas) saveCard(canvas, shareStatus); } }, 'Download result card'),
           h('button', { class: 'btn quiet', type: 'button', onclick: () => copyText(text, shareStatus, 'Text copied.') }, 'Copy text'),
           shareStatus),
