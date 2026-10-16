@@ -4,7 +4,7 @@
   "description": "Static single-page app; npm is only used for the build and tests.",
   "scripts": {
     "build": "node build.cjs",
-    "test": "node tests/stats.test.cjs && node tests/puzzles.test.cjs",
+    "test": "node tests/stats.test.cjs && node tests/puzzles.test.cjs && node tests/coach.test.cjs && node tests/worker.test.mjs",
     "test:live": "node tests/live-api.mjs"
   },
   "devDependencies": {

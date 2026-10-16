@@ -300,6 +300,28 @@ footer { border-top: 1px solid var(--rule); padding-block: 22px 40px; color: var
 .habit { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px 16px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--rule-2); }
 .habit p { margin: 2px 0 0; }
 @media (max-width: 560px) { .habit { grid-template-columns: minmax(0, 1fr) auto; } .habit > div { grid-column: 1 / -1; } }
+/* start screen, and specific feedback after each puzzle and at the end */
+.length-cards { display: grid; gap: 8px; }
+.length-cards .engine { grid-template-columns: 86px minmax(0, 1fr); align-items: baseline; gap: 2px 10px; padding: 9px 14px; }
+.btn.start-btn { min-height: 46px; padding-inline: 22px; font-size: 1rem; }
+.hero-start { gap: 8px 14px; }
+@media (min-width: 900px) { .hero-start { display: none; } }
+/* on phones the masthead blurb repeats the test's own intro and pushes the start below the fold */
+@media (max-width: 600px) { .brand p { display: none; } }
+.split { display: grid; gap: 8px; }
+.split-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--rule-2); }
+.split-bar > div { height: 100%; min-width: 0; }
+.seg-score { background: var(--accent); }
+.seg-use { background: var(--warn); }
+.seg-hidden { background: var(--neutral); }
+.obs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 12px 28px; }
+.obs h4 { margin-bottom: 8px; }
+.obs-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: .9rem; }
+.obs-list li { position: relative; padding-left: 22px; }
+.obs-list li::before { position: absolute; left: 0; top: 0; font-weight: 700; }
+.obs-list.good li::before { content: "✓"; color: var(--pos); }
+.obs-list.next li::before { content: "→"; color: var(--accent); }
+.obs-where { font-weight: 650; }
 .card-preview img { display: block; width: 100%; max-width: 720px; height: auto; border: 1px solid var(--rule); border-radius: 8px; }
 details.panel > summary.group-summary { cursor: pointer; }
 details.panel[open] > summary.group-summary { margin-bottom: 4px; }

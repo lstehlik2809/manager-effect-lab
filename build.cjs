@@ -11,7 +11,7 @@ const fonts = '<link rel="preconnect" href="https://fonts.googleapis.com"><link 
   '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:ital,wght@0,400..700;1,400&display=swap">';
 const css = read('styles.css');
 const body = read('body.html');
-const scripts = ['stats.js', 'puzzles.js', 'llm.js', 'app.js'].map(f => '<script>\n' + safe(read(f)) + '\n</script>').join('\n');
+const scripts = ['stats.js', 'puzzles.js', 'coach.js', 'scripted.js', 'llm.js', 'app.js'].map(f => '<script>\n' + safe(read(f)) + '\n</script>').join('\n');
 
 const full = `<!doctype html>
 <html lang="en">

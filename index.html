@@ -311,6 +311,28 @@ footer { border-top: 1px solid var(--rule); padding-block: 22px 40px; color: var
 .habit { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px 16px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--rule-2); }
 .habit p { margin: 2px 0 0; }
 @media (max-width: 560px) { .habit { grid-template-columns: minmax(0, 1fr) auto; } .habit > div { grid-column: 1 / -1; } }
+/* start screen, and specific feedback after each puzzle and at the end */
+.length-cards { display: grid; gap: 8px; }
+.length-cards .engine { grid-template-columns: 86px minmax(0, 1fr); align-items: baseline; gap: 2px 10px; padding: 9px 14px; }
+.btn.start-btn { min-height: 46px; padding-inline: 22px; font-size: 1rem; }
+.hero-start { gap: 8px 14px; }
+@media (min-width: 900px) { .hero-start { display: none; } }
+/* on phones the masthead blurb repeats the test's own intro and pushes the start below the fold */
+@media (max-width: 600px) { .brand p { display: none; } }
+.split { display: grid; gap: 8px; }
+.split-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--rule-2); }
+.split-bar > div { height: 100%; min-width: 0; }
+.seg-score { background: var(--accent); }
+.seg-use { background: var(--warn); }
+.seg-hidden { background: var(--neutral); }
+.obs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 12px 28px; }
+.obs h4 { margin-bottom: 8px; }
+.obs-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: .9rem; }
+.obs-list li { position: relative; padding-left: 22px; }
+.obs-list li::before { position: absolute; left: 0; top: 0; font-weight: 700; }
+.obs-list.good li::before { content: "✓"; color: var(--pos); }
+.obs-list.next li::before { content: "→"; color: var(--accent); }
+.obs-where { font-weight: 650; }
 .card-preview img { display: block; width: 100%; max-width: 720px; height: auto; border: 1px solid var(--rule); border-radius: 8px; }
 details.panel > summary.group-summary { cursor: pointer; }
 details.panel[open] > summary.group-summary { margin-bottom: 4px; }
@@ -411,7 +433,7 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
         <li>Both papers are working papers, circulated for discussion and not yet peer reviewed. The tasks are lab tasks done mostly by students; field validation is still to come.</li>
         <li>The causal reading depends on random assignment. In everyday HR data, managers and teams are not matched at random, so the same calculation would be confounded.</li>
         <li>With four or six rotations, the estimate for any single manager is noisy. Study 1 therefore focused on the typical size of manager effects (σ<sub>α</sub>) and on what predicts them. Use the reliability calculator before ranking individuals.</li>
-        <li>The leadership test on this site follows Study 2's structure but uses new puzzles, other AI models, four team puzzles instead of six and its own scoring. It has not been validated against human teams and has no norms, so use it for practice or as a research tool with a group, not to judge an individual.</li>
+        <li>The leadership test on this site follows Study 2's structure but uses new puzzles, other AI models, two or four team puzzles instead of six and its own scoring. It has not been validated against human teams and has no norms, so use it for practice or as a research tool with a group, not to judge an individual.</li>
         <li>Treat a score as one input among several, and check for adverse impact before using any test in selection.</li>
       </ul>
       <p class="small muted">A short summary of both papers: Luděk Stehlík, <a href="https://blog-about-people-analytics.netlify.app/posts/2025-06-12-causal-impact-of-leadership-skills/" target="_blank" rel="noopener">Novel way to measure leadership skills via causal inference (and AI)?</a></p>
@@ -529,7 +551,7 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
 
 <footer>
   <div class="wrap">
-    <p>Built on Weidmann, Vecci, Said, Deming &amp; Bhalotra (2024), <em>How Do You Find a Good Manager?</em> NBER WP 32699, and Weidmann, Xu &amp; Deming (2025), <em>Measuring Human Leadership Skills with AI Agents</em>, NBER WP 33662. This is an independent implementation; numbers it produces are estimates from your data, not results from the papers. The analysis runs entirely in your browser; uploaded files never leave this page. The AI leadership test sends chat messages only to the AI provider you pick (Gemini or Claude), and only after you start it.</p>
+    <p>Built on Weidmann, Vecci, Said, Deming &amp; Bhalotra (2024), <em>How Do You Find a Good Manager?</em> NBER WP 32699, and Weidmann, Xu &amp; Deming (2025), <em>Measuring Human Leadership Skills with AI Agents</em>, NBER WP 33662. This is an independent implementation; numbers it produces are estimates from your data, not results from the papers. The analysis runs entirely in your browser; uploaded files never leave this page. The AI leadership test sends your chat messages only to the AI service behind the teammates you pick, and only after you start it; scripted teammates send nothing.</p>
   </div>
 </footer>
 <div class="tip" id="tip" hidden></div>
@@ -1643,8 +1665,496 @@ HOW TO TAKE PART
 
 </script>
 <script>
+/* Manager Effect Lab — reads one puzzle's chat and answer and turns them into specific feedback:
+ * which questions were specific or repeated, where the leader built on a teammate's answer, which
+ * decisive reports never came up and who held them, and how many points were lost to hidden reports
+ * versus to how the leader used the reports they had.
+ * Pure functions with no DOM, so the same code runs in the browser and in the Node tests.
+ * These are rough rules for these puzzles, not a validated coding scheme. */
+(function (root) {
+  'use strict';
+  const S = root.MEL || require('./stats.js');
+  const PZ = root.MEL_PUZZLES || require('./puzzles.js');
+  const FOL = PZ.FOLLOWERS;
+  const NAMES = FOL.map(f => f.name.toLowerCase());
+  const nameOf = id => (FOL.find(f => f.id === id) || { name: id }).name;
+
+  /* ---------- text helpers (also used by the scripted teammates) ---------- */
+  const STOP = new Set(('the and for are but not you your yours with from have has had what whats which who whom whose when where why how ' +
+    'this that these those there theres their they them then than was were been being does did doing done can could would should will shall ' +
+    'may might must just also very really about into onto over under again more most some any anything something everything nothing all each ' +
+    'every other another such only own same too yes now here our ours let lets please thanks thank okay hey hello hiya good great cool nice ' +
+    'tell know think say says said share send give list check confirm see look got get need want like one two three first second ' +
+    'report reports question questions option options rule ruled rules team everyone anyone anybody guys folks clue clues info information ' +
+    'mean means its did didnt dont doesnt isnt arent wasnt else still sure maybe thing things whole far lot bit way yet ' +
+    'out off never ever since after before while until because cannot cant both either neither found show shows showed without within').split(' '));
+  const stem = w => (w.length > 5 ? w.slice(0, 5) : w.replace(/s$/, ''));
+  const words = t => (String(t).toLowerCase().replace(/['’]/g, '').match(/[a-z0-9]+/g) || []);
+  /** Content words, stemmed (no stop words, numbers or teammate names). */
+  const tokens = t => words(t).filter(w => w.length >= 3 && !/^\d+$/.test(w) && !STOP.has(w) && !NAMES.includes(w)).map(stem);
+  const escRe = t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  /** Per puzzle: generic words (title, scenario, questions) and the specific terms of its reports and options. */
+  const vocabCache = new Map();
+  function vocab(p) {
+    if (vocabCache.has(p.id)) return vocabCache.get(p.id);
+    const generic = new Set(tokens([p.title, p.scenario].concat(p.questions.map(q => q.text)).join(' ')));
+    const specific = new Set();
+    p.clues.forEach(c => tokens(c.text).forEach(t => { if (!generic.has(t)) specific.add(t); }));
+    const options = p.questions.map(q => q.options.map((o, k) => {
+      const keys = tokens(o).filter(t => !generic.has(t) && !q.options.some((o2, k2) => k2 !== k && tokens(o2).includes(t)));
+      keys.forEach(t => specific.add(t));
+      // options without a distinctive word ("1 March") are matched as a phrase
+      return { keys, phrase: keys.length || !/\s/.test(o) ? null : new RegExp('(^|[^a-z0-9])' + escRe(o.toLowerCase()) + '($|[^a-z0-9])') };
+    }));
+    const v = { generic, specific, options, optionKeys: new Set(options.flat().flatMap(o => o.keys)) };
+    vocabCache.set(p.id, v);
+    return v;
+  }
+  /** Options named in a text: [{ q, k }]. */
+  function optionMentions(p, text) {
+    const v = vocab(p), lower = String(text).toLowerCase(), toks = new Set(tokens(text)), out = [];
+    v.options.forEach((opts, q) => opts.forEach((o, k) => { if (o.keys.some(t => toks.has(t)) || (o.phrase && o.phrase.test(lower))) out.push({ q, k }); }));
+    return out;
+  }
+  /** Report numbers cited in a text ("#12", "report 12", "report no. 12"). */
+  function reportNums(text) {
+    const out = new Set(), re = /(?:#\s?|\breports?\s+(?:no\.?\s*|number\s*)?#?\s?)(\d{1,2})\b/gi;
+    let m;
+    while ((m = re.exec(String(text)))) out.add(+m[1]);
+    return [...out];
+  }
+  /** Which question a text points at ("question 2", "Q1", "the first question"), or null. */
+  function questionMention(text) {
+    const t = String(text).toLowerCase();
+    if (/\b(question|q)\s*#?\s*(1|one)\b|\bfirst question\b/.test(t)) return 0;
+    if (/\b(question|q)\s*#?\s*(2|two)\b|\bsecond question\b/.test(t)) return 1;
+    return null;
+  }
+  const sentences = text => String(text).split(/(?<=[?!.])\s+|\n+/).map(s => s.trim()).filter(Boolean);
+  const LEAD = new RegExp('^(?:(?:ok|okay|so|and|also|great|thanks|thank you|cool|right|now|then|next|hi|hey|hello|guys|team|all|everyone|folks|quick question|one more|last|finally|btw|' + NAMES.join('|') + ')\\b[\\s,!:;.\\-–—]*)+', 'i');
+  const ASK = /^(what|which|who|whom|whose|when|where|why|how|do|does|did|is|are|was|were|can|could|would|will|should|have|has|had|any|anything|anyone|anybody|tell|share|send|give|list|check|confirm|explain|describe|let me know|please|pls|might)\b/i;
+  /** A question or a request for information: ends in "?" or opens like one ("what…", "tell me…", "share…"). */
+  function isQuestion(s) {
+    if (s.includes('?')) return true;
+    const t = s.replace(LEAD, '').trim();
+    return ASK.test(t) && !/^(please\s+)?(submit|wait|stop|hold on|be quiet)\b/i.test(t);
+  }
+  /** Who a leader message is for: its recipient, or the teammates a message to everyone names. */
+  function audienceOf(m) {
+    if (m.to !== 'all') return [m.to];
+    const named = FOL.filter(f => new RegExp('\\b' + f.name + '\\b', 'i').test(m.text)).map(f => f.id);
+    return named.length ? named : FOL.map(f => f.id);
+  }
+  const quote = (t, n) => { t = String(t).replace(/\s+/g, ' ').trim().replace(/\.$/, ''); n = n || 90; return t.length > n ? t.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : t; };
+  const listText = xs => (xs.length < 2 ? xs.join('') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1]);
+
+  /* ---------- what the leader could have known ---------- */
+  /** Options of question qi that the reports in `nums` rule out: Map option -> report numbers that do it. */
+  function ruledOut(p, qi, nums) {
+    const res = new Map();
+    p.clues.filter(c => c.q === qi && c.kind === 'out' && nums.has(c.num)).forEach(c => c.rules.forEach(k => { if (!res.has(k)) res.set(k, [c.num]); }));
+    ruleGroups(p, qi).filter(g => g.length > 1 && g.every(c => nums.has(c.num))).forEach(g => g[0].rules.forEach(k => { if (!res.has(k)) res.set(k, g.map(c => c.num)); }));
+    return res;
+  }
+  /** The decisive reports of a question as rule groups: a report that rules out on its own, or both halves of a two-part rule. */
+  function ruleGroups(p, qi) {
+    const groups = [], halves = new Map();
+    p.clues.filter(c => c.q === qi && c.kind !== 'noise').forEach(c => {
+      if (c.kind === 'out') groups.push([c]);
+      else { const k = c.rules.join(','); if (!halves.has(k)) { halves.set(k, []); groups.push(halves.get(k)); } halves.get(k).push(c); }
+    });
+    return groups;
+  }
+  /** Best possible score on question qi with only the reports in `nums`: an even split over the options they leave standing. */
+  function bestWith(p, qi, nums) {
+    const out = ruledOut(p, qi, nums), left = [0, 1, 2, 3, 4].filter(k => !out.has(k));
+    return S.credenceScore(S.correctDist(left, 5), S.correctDist(p.questions[qi].answer, 5));
+  }
+
+  /* ---------- one puzzle ---------- */
+  const OFFER = /\b(i have|i've got|i got|there's|there is|i also have)\s+(more|another|one more|something else|other|a couple more)|\bmore (on|about) (this|that|it)\b|\bif you (want|need) (it|them|more)\b|\bmore where that came from\b|\bask (me )?if you need\b/i;
+  const MORE_REQ = /\b(more|else|rest|other|another|yes|go ahead|sure|send (it|them))\b/i;
+  const REPEAT_ADVICE = 'Asking again makes teammates recite their reports a couple at a time, relevant or not; asking about the options still standing gets the decisive ones sooner.';
+
+  /**
+   * Analyse one puzzle. messages: the chat ({ from: 'leader' | 'f1'…, to, text, t }); answers: [[5 credences] per question].
+   * opts.timeLeft: seconds left on the clock when the answer was submitted (optional).
+   * Returns { metrics, info, observations }.
+   */
+  function analyse(p, messages, answers, opts) {
+    opts = opts || {};
+    messages = messages || [];
+    const v = vocab(p);
+    const clueBy = new Map(p.clues.map(c => [c.num, c]));
+    const critical = p.solo ? [] : PZ.criticalFollowerClues(p);
+    const critNums = new Set(critical.map(c => c.num));
+    const leaderMsgs = [], qList = [], heard = [], leaderToks = new Set();
+    const surfaced = new Map(), offers = new Map(), lastTo = {};
+    const askedAny = new Set(), askedDirect = new Set(), askedAbout = {};
+    let turns = 0;
+    messages.forEach((m, i) => {
+      if (i && (m.from === 'leader') !== (messages[i - 1].from === 'leader')) turns++;
+      if (m.from === 'leader') {
+        const aud = audienceOf(m), direct = aud.length < FOL.length;
+        const toks = tokens(m.text), nums = reportNums(m.text);
+        // a follow-up picks up a report number or a specific term that a teammate brought up; it connects
+        // teammates when it reaches someone who had not mentioned that detail themselves
+        // Option names come from the answer sheet, so they count only when asked straight back to the teammate who raised them.
+        const picked = [], srcOf = has => new Set(heard.filter(has).map(r => r.fid));
+        nums.forEach(n => { const src = srcOf(r => r.nums.has(n)); if (src.size) picked.push(src); });
+        toks.filter(t => v.specific.has(t) && !leaderToks.has(t)).forEach(t => {
+          const src = srcOf(r => r.toks.has(t));
+          if (!src.size) return;
+          if (!v.optionKeys.has(t)) picked.push(src);
+          else if (direct && aud.some(a => src.has(a))) picked.push(new Set(aud));
+        });
+        let followUp = picked.length > 0;
+        const connect = picked.some(src => aud.some(a => !src.has(a)));
+        aud.forEach(fid => {
+          if (!offers.has(fid)) return;
+          if (direct || /\b(more|else|rest|other|another)\b/i.test(m.text)) { offers.delete(fid); if (direct && MORE_REQ.test(m.text)) followUp = true; }
+        });
+        // specific: the message names an option, a report number or a detail from the reports
+        // ("You mentioned the label applicator. Anything else on it?" counts)
+        const specificMsg = nums.length > 0 || toks.some(t => v.specific.has(t));
+        const qs = sentences(m.text).filter(isQuestion).map(s => {
+          const norm = new Set(words(s).filter(w => !NAMES.includes(w) && !/^(please|pls|thanks|team|guys|hi|hey|hello|ok|okay|so|and)$/.test(w)));
+          const key = [...norm].sort().join(' ');
+          const targeted = specificMsg;
+          const repeat = qList.some(q => q.aud.some(a => aud.includes(a)) && (q.key === key || jaccard(q.norm, norm) >= 0.75));
+          const q = { msg: leaderMsgs.length, text: s, norm, key, aud, targeted, repeat };
+          qList.push(q);
+          return q;
+        });
+        if (qs.length) aud.forEach(fid => {
+          askedAny.add(fid);
+          if (direct) askedDirect.add(fid);
+          optionMentions(p, m.text).forEach(o => { (askedAbout[fid] = askedAbout[fid] || new Set()).add(o.q + ':' + o.k); });
+        });
+        const lm = { i, m, aud, direct, qs, followUp, connect, credited: [] };
+        leaderMsgs.push(lm);
+        aud.forEach(fid => { lastTo[fid] = lm; });
+        toks.forEach(t => leaderToks.add(t));
+      } else {
+        const nums = reportNums(m.text);
+        nums.forEach(n => {
+          if (critNums.has(n) && clueBy.get(n).holder === m.from && !surfaced.has(n)) {
+            surfaced.set(n, m.from);
+            if (lastTo[m.from]) lastTo[m.from].credited.push(n);
+          }
+        });
+        heard.push({ fid: m.from, toks: new Set(tokens(m.text)), nums: new Set(nums) });
+        if (OFFER.test(m.text)) offers.set(m.from, i);
+      }
+    });
+
+    const L = leaderMsgs.map(x => x.m);
+    const leaderText = L.map(m => m.text).join(' ');
+    const nWords = (leaderText.match(/\S+/g) || []).length;
+    const we = (leaderText.match(/\b(we|us|our|ours|ourselves|let's|lets)\b/gi) || []).length;
+    const repeats = qList.filter(q => q.repeat), targeted = qList.filter(q => !q.repeat && q.targeted), generic = qList.filter(q => !q.repeat && !q.targeted);
+    const missed = critical.filter(c => !surfaced.has(c.num));
+    const metrics = {
+      leaderMessages: L.length, words: nWords, questions: qList.length, turns, weRate: nWords ? 100 * we / nWords : 0,
+      engaged: new Set(messages.filter(m => m.from !== 'leader').map(m => m.from)).size,
+      surfaced: surfaced.size, critical: critical.length, broadcast: L.filter(m => m.to === 'all').length,
+      targeted: targeted.length, generic: generic.length, repeats: repeats.length,
+      followUps: leaderMsgs.filter(x => x.followUp).length, connects: leaderMsgs.filter(x => x.connect).length,
+      askedDirect: FOL.map(f => f.id).filter(id => askedDirect.has(id)), askedAny: FOL.map(f => f.id).filter(id => askedAny.has(id)),
+      offersIgnored: [...offers.keys()], surfacedNums: [...surfaced.keys()], missedNums: missed.map(c => c.num)
+    };
+
+    /* where the points went: hidden reports vs using the reports the leader had */
+    const avail = new Set(p.clues.filter(c => p.solo || c.holder === 'public' || c.holder === 'leader').map(c => c.num));
+    surfaced.forEach((_, n) => avail.add(n));
+    const perQ = p.questions.map((q, qi) => {
+      const correct = S.correctDist(q.answer, 5), a = answers[qi].map(x => +x || 0);
+      const best = bestWith(p, qi, avail), actual = S.credenceScore(a, correct);
+      const out = ruledOut(p, qi, avail);
+      const kept = [...out.keys()].filter(k => a[k] > 0).map(k => ({ k, pct: a[k], refs: out.get(k) }));
+      const dropped = q.answer.filter(k => !(a[k] > 0));
+      const pos = [0, 1, 2, 3, 4].filter(k => a[k] > 0 && !out.has(k));
+      const uneven = pos.length >= 2 && Math.max(...pos.map(k => a[k])) - Math.min(...pos.map(k => a[k])) >= 10;
+      return { best, actual, hidden: 100 - Math.max(best, actual), use: Math.max(0, best - actual), kept, dropped, uneven };
+    });
+    const info = {
+      perQ: perQ.map(x => ({ best: x.best, actual: x.actual, hidden: x.hidden, use: x.use })),
+      best: S.mean(perQ.map(x => x.best)), actual: S.mean(perQ.map(x => x.actual)),
+      hidden: S.mean(perQ.map(x => x.hidden)), use: S.mean(perQ.map(x => x.use))
+    };
+
+    /* observations: specific things the leader did, good and to try next time */
+    const obs = [];
+    const add = tone => (key, weight, text) => { const o = { tone, key, weight, text }; obs.push(o); return o; };
+    const good = add('good'), tip = add('tip');
+    const optName = (qi, k) => p.questions[qi].options[k];
+    const ref = n => { const c = clueBy.get(n); return c.holder === 'leader' ? 'your report #' + n : c.holder === 'public' ? 'shared report #' + n : nameOf(c.holder) + '\'s report #' + n; };
+
+    if (!p.solo) {
+      // praise a question that drew out decisive reports, but not a general call to everyone
+      const best = leaderMsgs.filter(x => x.credited.length && x.qs.some(q => !q.repeat) && (x.qs.some(q => q.targeted) || x.direct))
+        .sort((a, b) => b.credited.length - a.credited.length || (b.qs.some(q => q.targeted) - a.qs.some(q => q.targeted)))[0];
+      if (best) {
+        const who = [...new Set(best.credited.map(n => surfaced.get(n)))].map(nameOf);
+        good('best-ask', 3 + 2 * best.credited.length, `Your question “${quote(best.m.text)}” drew out ${best.credited.length === 1 ? 'decisive report' : 'decisive reports'} ${listText(best.credited.map(n => '#' + n))} from ${listText(who)}.`);
+      }
+      if (critical.length && missed.length === 0) good('all-surfaced', 6, 'Every decisive report your teammates held came out.');
+      const conn = leaderMsgs.find(x => x.connect);
+      if (conn) good('connect', 3 + metrics.connects, `You passed on what one teammate said to the others${metrics.connects > 1 ? ` ${metrics.connects} times` : ''}, for example “${quote(conn.m.text, 80)}”. Connecting reports is how hidden-profile puzzles get solved.`);
+      if (metrics.askedDirect.length === FOL.length) good('all-asked', 2, 'You asked all three teammates directly.');
+
+      if (!qList.length) tip('no-questions', 8, 'You didn\'t ask your teammates anything. Most of the decisive reports sat with them.');
+      // the costliest group of decisive reports that never came up
+      // points at stake = what the report would add beyond the better of the best possible and the actual answer;
+      // a missing report that was guessed right anyway costs nothing, but the guess is worth naming
+      const gaps = [];
+      p.questions.forEach((q, qi) => ruleGroups(p, qi).forEach(g => {
+        const miss = g.filter(c => !avail.has(c.num));
+        if (!miss.length) return;
+        const plus = new Set(avail); miss.forEach(c => plus.add(c.num));
+        const withIt = bestWith(p, qi, plus);
+        if (withIt - perQ[qi].best < 0.5) return;
+        const stake = Math.max(0, withIt - Math.max(perQ[qi].best, perQ[qi].actual));
+        const guessed = stake <= 0.5 && g[0].rules.every(k => !(+answers[qi][k] > 0));
+        if (stake > 0.5 || guessed) gaps.push({ qi, g, miss, stake, guessed });
+      }));
+      gaps.sort((a, b) => b.stake - a.stake);
+      gaps.slice(0, 2).forEach((gp, rank) => {
+        const opts = gp.g[0].rules.map(k => optName(gp.qi, k)), have = gp.g.filter(c => avail.has(c.num));
+        const holder = gp.miss[0].holder, nm = nameOf(holder);
+        if (gp.guessed) {
+          const together = have.length ? ` together with ${ref(have[0].num)}` : gp.miss.length > 1 ? ' together' : '';
+          tip(rank ? 'guess-2' : 'guess', 1.5, `You ruled out ${listText(opts)} on a guess: ${listText(gp.miss.map(c => ref(c.num)))}, which ${gp.miss.length > 1 ? 'settle' : 'settles'} ${opts.length > 1 ? 'them' : 'it'}${together}, never came up. Right this time, but asking would have made it certain.`);
+          return;
+        }
+        let text = gp.miss.length === 1
+          ? `${nm}'s report #${gp.miss[0].num} never came up. ${have.length ? 'Together with ' + ref(have[0].num) + ', it' : 'It'} rules out ${listText(opts)}.`
+          : `${listText(gp.miss.map(c => ref(c.num)))} never came up. Together they rule out ${listText(opts)}.`;
+        const about = askedAbout[holder] || new Set();
+        if (gp.g[0].rules.some(k => about.has(gp.qi + ':' + k))) text += ` You did ask ${nm} about ${opts[0]}; when a teammate answers without a report number, ask which report says so.`;
+        else if (!askedAny.has(holder)) text += ` You never asked ${nm} anything.`;
+        else if (!askedDirect.has(holder)) text += ` You never asked ${nm} directly; a question about ${opts[0]} would have found it.`;
+        else text += ` A question to ${nm} about ${opts[0]} would have found it.`;
+        tip(rank ? 'missed-2' : 'missed', 2 + gp.stake / 4, text + ` (Worth ${Math.round(gp.stake)} points on Q${gp.qi + 1}.)`);
+      });
+      if (repeats.length >= 2) {
+        const example = quote(repeats[0].text, 70);
+        tip('repeats', 2 + repeats.length, `${repeats.length} of your questions repeated an earlier one to the same people, such as “${example}”. ${REPEAT_ADVICE}`).example = example;
+      }
+      if (qList.length >= 2 && !targeted.length) {
+        const opt = p.questions[0].options.find((o, k) => p.questions[0].answer.indexOf(k) < 0);
+        tip('generic', 4, `All your questions were general, such as “${quote((generic[0] || qList[0]).text, 60)}”. Naming an option, for example asking who has anything on “${opt}”, tells teammates which report to look for.`);
+      }
+      metrics.offersIgnored.forEach(fid => {
+        const stillHidden = missed.filter(c => c.holder === fid).length;
+        if (stillHidden) tip('offer', 3 + stillHidden, `${nameOf(fid)} offered to share more, but you didn't follow up. ${nameOf(fid)} still held ${stillHidden === 1 ? 'a decisive report' : stillHidden + ' decisive reports'}.`);
+      });
+      if (opts.timeLeft >= 60 && missed.length && !perQ.every(x => x.actual >= 99.5)) tip('early', 2, `You submitted with ${Math.floor(opts.timeLeft / 60)}:${String(Math.round(opts.timeLeft % 60)).padStart(2, '0')} left while ${missed.length === 1 ? 'a decisive report was' : missed.length + ' decisive reports were'} still hidden.`);
+    }
+    // using the reports: the same checks for solo and team puzzles
+    perQ.forEach((x, qi) => {
+      x.kept.slice(0, 1).forEach(kp => {
+        const refs = listText(kp.refs.map(n => (p.solo ? '#' + n : ref(n)))) + (kp.refs.length > 1 ? ' together' : '');
+        tip('kept', 2 + kp.pct / 6, (p.solo ? `The reports rule out ${optName(qi, kp.k)} (${refs})` : `You had what you needed to rule out ${optName(qi, kp.k)} (${refs})`) + `, but you still gave it ${kp.pct}%.`);
+      });
+      x.dropped.slice(0, 1).forEach(k => tip('dropped', 4, `You ruled out ${optName(qi, k)}, but no report rules it out: it was one of the right answers on Q${qi + 1}.`));
+      if (x.uneven && !x.kept.length && !x.dropped.length) tip('uneven', 2, `On Q${qi + 1} you gave unequal shares to options that no report ${p.solo ? '' : 'you saw '}separated. When the reports can't tell options apart, equal shares score best.`);
+    });
+    const perfect = perQ.every(x => x.actual >= 99.5);
+    if (perfect) good('perfect', 5, p.solo ? 'You read every report correctly.' : 'You got the exact answer on both questions.');
+    else if (!p.solo && perQ.every(x => x.use < 1 && x.actual <= x.best + 1)) good('used-well', 3, 'You used the reports you gathered well: your answer was the best one possible with them.');
+
+    return { metrics, info, observations: obs };
+  }
+  function jaccard(a, b) {
+    if (!a.size && !b.size) return 1;
+    let n = 0; a.forEach(x => { if (b.has(x)) n++; });
+    return n / (a.size + b.size - n);
+  }
+  /** The observations worth showing: the strongest few of each tone. */
+  function top(observations, nGood, nTip) {
+    const by = tone => observations.filter(o => o.tone === tone).sort((a, b) => b.weight - a.weight);
+    return { good: by('good').slice(0, nGood == null ? 2 : nGood), tips: by('tip').slice(0, nTip == null ? 3 : nTip) };
+  }
+
+  /* ---------- a whole test ---------- */
+  /**
+   * results: [{ title, solo, analysis: analyse(…) }]. Returns totals and the strongest specific observations across puzzles.
+   */
+  function summarise(results) {
+    const team = results.filter(r => !r.solo && r.analysis), n = team.length;
+    const sum = k => team.reduce((a, r) => a + (+r.analysis.metrics[k] || 0), 0);
+    const per = k => (n ? sum(k) / n : NaN);
+    const allQ = team.flatMap(r => r.analysis.info.perQ);
+    const totals = {
+      questions: per('questions'), targeted: per('targeted'), generic: per('generic'), repeats: per('repeats'),
+      followUps: per('followUps'), connects: per('connects'), turns: per('turns'), words: per('words'), weRate: per('weRate'),
+      surfaced: sum('surfaced'), critical: sum('critical'), repeatsTotal: sum('repeats'), connectsTotal: sum('connects'),
+      targetedShare: sum('targeted') + sum('generic') ? sum('targeted') / (sum('targeted') + sum('generic')) : NaN,
+      hidden: allQ.length ? S.mean(allQ.map(x => x.hidden)) : NaN, use: allQ.length ? S.mean(allQ.map(x => x.use)) : NaN,
+      allAsked: team.filter(r => r.analysis.metrics.askedDirect.length === FOL.length).length,
+      allSurfaced: team.filter(r => r.analysis.metrics.critical && r.analysis.metrics.surfaced === r.analysis.metrics.critical).length
+    };
+    // strongest instance of each kind of observation, labelled with its puzzle
+    const best = tone => {
+      const byKey = new Map();
+      results.filter(r => r.analysis).forEach(r => r.analysis.observations.filter(o => o.tone === tone).forEach(o => {
+        const k = o.key.replace(/-2$/, '');
+        const cur = byKey.get(k);
+        if (!cur || o.weight > cur.weight) byKey.set(k, Object.assign({}, o, { key: k, puzzle: r.title, count: (cur ? cur.count : 0) + 1 }));
+        else cur.count++;
+      }));
+      return [...byKey.values()];
+    };
+    const goods = best('good'), tips = best('tip');
+    // summary-level wording for patterns that recur across puzzles
+    goods.forEach(o => {
+      if (o.key === 'all-surfaced') { o.text = `Every decisive report came out in ${totals.allSurfaced} of ${n} team puzzles.`; o.weight = 3 + 2 * totals.allSurfaced; o.puzzle = null; }
+      if (o.key === 'all-asked') { o.text = `You asked all three teammates directly in ${totals.allAsked} of ${n} team puzzles.`; o.weight = 1 + totals.allAsked; o.puzzle = null; }
+      if (o.key === 'connect' && totals.connectsTotal > 1) o.weight += totals.connectsTotal;
+    });
+    tips.forEach(o => {
+      if (o.key === 'repeats' && o.count > 1) { o.text = `Across the test, ${totals.repeatsTotal} of your questions repeated an earlier one, such as “${o.example}”. ${REPEAT_ADVICE}`; o.puzzle = null; }
+    });
+    const pick = (xs, k) => xs.sort((a, b) => b.weight - a.weight).slice(0, k);
+    return { totals, strengths: pick(goods, 3), tips: pick(tips, 3) };
+  }
+
+  root.MEL_COACH = { tokens, words, vocab, optionMentions, reportNums, questionMention, sentences, isQuestion, audienceOf, ruledOut, bestWith, analyse, top, summarise };
+  if (typeof module !== 'undefined' && module.exports) module.exports = root.MEL_COACH;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* Manager Effect Lab — scripted teammates: no API and no key. They read the leader's messages with
+ * simple rules (who is addressed, options, report numbers, topics, requests for more or for a view)
+ * and pass on their reports a couple at a time, as the LLM teammates are briefed to (followerBrief).
+ * Each has a slightly different voice. Deterministic, so the Node tests can check them. */
+(function (root) {
+  'use strict';
+  const PZ = root.MEL_PUZZLES || require('./puzzles.js');
+  const C = root.MEL_COACH || require('./coach.js');
+
+  const VOICES = {
+    f1: { // Mira: brisk and precise
+      share: ['Report #{n}: {t}', 'I have #{n}: {t}', '#{n} says: {t}'],
+      again: 'Same as before, #{n}: {t}', more: 'I have more on that if you want it.',
+      none: ['Nothing on that in my reports.', 'Nothing on that, sorry.', 'I have nothing on that.'],
+      done: 'That is everything I have.', doneQ: 'That is all I have on that question.', doneTopic: 'That is all I have on that.',
+      hi: 'Hi! Ready.', ok: ['OK.', 'Got it.', 'Noted.'], ack: 'Agreed.',
+      view: 'Going by my report #{n}, I would rule out {o}. Beyond that it is your call.', noView: 'My reports do not settle it. Your call.'
+    },
+    f2: { // Theo: chatty
+      share: ['Good question. Report #{n} says: {t}', 'Oh, I have one on that. #{n}: {t}', 'Yes! #{n}: {t}'],
+      again: 'Like I said, #{n}: {t}', more: 'There is more where that came from if you need it.',
+      none: ['Hmm, nothing on that in my pile.', 'Sorry, nothing on that from me.', 'Nope, nothing on that here.'],
+      done: 'I think I have shared everything now.', doneQ: 'That is all I have on that one.', doneTopic: 'That was my only one on that.',
+      hi: 'Hey! Happy to help.', ok: ['Sure thing.', 'Will do.', 'Makes sense.'], ack: 'Sounds right to me.',
+      view: 'My report #{n} says we can drop {o}. The rest I can\'t judge from my side.', noView: 'Honestly, nothing in my reports settles it.'
+    },
+    f3: { // Jonas: careful
+      share: ['I think #{n} is relevant: {t}', 'Report #{n}: {t}', 'Let me check... #{n}: {t}'],
+      again: 'As I mentioned, #{n}: {t}', more: 'I have another one that may matter, if you want it.',
+      none: ['I don\'t see anything on that in my reports.', 'Nothing on that, as far as I can see.', 'I have nothing on that, I\'m afraid.'],
+      done: 'I believe I have passed on everything.', doneQ: 'I have nothing more on that question.', doneTopic: 'I have nothing more on that, I think.',
+      hi: 'Hello. Ready when you are.', ok: ['Understood.', 'OK, noted.', 'Right.'], ack: 'That matches what I have.',
+      view: 'Based on report #{n}, {o} looks ruled out. I\'m not sure about the others.', noView: 'I can\'t tell from my reports, sorry.'
+    }
+  };
+  const OPINION = /\b(what do you think|what'?s your (view|take|guess|opinion)|your (view|opinion|take|guess)|do you agree|which (one|option)s? (is|are|would|do|should)|should we|any (ideas|thoughts|hunches)|thoughts\b|best guess)/i;
+  const MORE = /\b(anything else|any ?more|more|the rest|other reports?|another|what else|go ahead|yes,? please|send (it|them))\b/i;
+  const ALL = /\b(all|every|everything|anything|what (do|did) you (have|know|got|see)|what have you got|your (reports?|clues?|info|information|notes)|share|send|list|tell (me|us))\b/i;
+  const GREET = /^\s*(hi|hello|hey|hiya|good (morning|afternoon|evening))\b/i;
+  const THANKS = /^\s*(thanks|thank you|thx|great|perfect|ok|okay|got it|cool|nice|good|noted|understood|brilliant|super)\b/i;
+  const pick = (x, n) => (Array.isArray(x) ? x[n % x.length] : x);
+  const fill = (tpl, cl) => tpl.replace('{n}', cl.num).replace('{t}', cl.text);
+
+  /**
+   * The next message from scripted teammate fid in puzzle p, or '' to stay quiet.
+   * messages: the chat so far. shared: Set of report numbers fid has passed on (updated in place).
+   */
+  function reply(p, fid, messages, shared) {
+    const V = VOICES[fid];
+    let lastOwn = -1;
+    messages.forEach((m, i) => { if (m.from === fid) lastOwn = i; });
+    const said = messages.filter(m => m.from === fid).length;
+    const incoming = messages.slice(lastOwn + 1).filter(m => m.from === 'leader' && (m.to === 'all' || m.to === fid));
+    if (!incoming.length) return '';
+    const latest = incoming[incoming.length - 1], direct = incoming.some(m => m.to === fid);
+    const named = PZ.FOLLOWERS.filter(f => new RegExp('\\b' + f.name + '\\b', 'i').test(latest.text)).map(f => f.id);
+    if (!direct && named.length && !named.includes(fid)) return '';   // meant for someone else
+    const text = incoming.map(m => m.text).join('\n');
+    const mine = PZ.cluesFor(p, fid).slice().sort((a, b) => (a.holder === 'public') - (b.holder === 'public'));
+    const v = C.vocab(p);
+    const topics = new Set(C.tokens(text).filter(t => v.specific.has(t)));
+    const opts = C.optionMentions(p, text), nums = C.reportNums(text), qMention = C.questionMention(text);
+    const asked = C.sentences(text).some(C.isQuestion);
+    const share = (cls, again) => {
+      cls.forEach(cl => shared.add(cl.num));
+      return cls.map((cl, k) => (k ? 'Also #' + cl.num + ': ' + cl.text : fill(again ? V.again : pick(V.share, said), cl))).join(' ');
+    };
+    const freshFor = filter => mine.filter(cl => !shared.has(cl.num) && filter(cl));
+
+    // 1. report numbers
+    if (nums.length) {
+      const held = mine.filter(cl => nums.includes(cl.num));
+      if (held.length) return share(held.slice(0, 2), held.every(cl => shared.has(cl.num)));
+      if (!topics.size && !opts.length) return direct ? `I don't have #${nums[0]}.` : '';
+    }
+    // 2. a topic: options or specific terms from the reports. When an option is named, one shared
+    // word is not enough ("operator error" should not bring up "zero errors" on the vision sensor).
+    const onTopic = (tp, op) => mine.map(cl => {
+      let sc = new Set(C.tokens(cl.text).filter(t => tp.has(t))).size;
+      if (cl.rules && op.some(o => o.q === cl.q && cl.rules.includes(o.k))) sc += 2;
+      if (qMention != null && cl.q === qMention) sc += 0.5;
+      return { cl, sc };
+    }).filter(x => x.sc >= (op.length ? 2 : 1)).sort((a, b) => b.sc - a.sc || (a.cl.holder === 'public') - (b.cl.holder === 'public'));
+    if (topics.size || opts.length) {
+      const scored = onTopic(topics, opts);
+      const fresh = scored.filter(x => !shared.has(x.cl.num)).map(x => x.cl);
+      if (fresh.length) return share(fresh.slice(0, 2)) + (fresh.length > 2 ? ' ' + V.more : '');
+      if (scored.length) return MORE.test(latest.text) ? V.doneTopic : share([scored[0].cl], true);
+      if (asked) return pick(V.none, said);
+      return direct ? pick(V.ok, said) : '';
+    }
+    // 3. a view on the answer
+    if (OPINION.test(text)) {
+      const outs = mine.filter(cl => cl.kind === 'out' && (qMention == null || cl.q === qMention));
+      if (!outs.length) return V.noView;
+      shared.add(outs[0].num);
+      return V.view.replace('{n}', outs[0].num).replace('{o}', p.questions[outs[0].q].options[outs[0].rules[0]]);
+    }
+    // 4. greetings and thanks
+    if (!asked && GREET.test(text)) return V.hi;
+    if (!asked && THANKS.test(latest.text) && !MORE.test(latest.text)) return direct ? pick(V.ok, said) : '';
+    // 5. "anything else?" carries on with the topic of the previous request
+    if (MORE.test(text)) {
+      const prev = messages.slice(0, lastOwn + 1).filter(m => m.from === 'leader' && (m.to === 'all' || m.to === fid)).pop();
+      if (prev) {
+        const fresh = onTopic(new Set(C.tokens(prev.text).filter(t => v.specific.has(t))), C.optionMentions(p, prev.text)).filter(x => !shared.has(x.cl.num)).map(x => x.cl);
+        if (fresh.length) return share(fresh.slice(0, 2)) + (fresh.length > 2 ? ' ' + V.more : '');
+      }
+    }
+    // 6. a general request for reports, or for more
+    if (asked || MORE.test(text) || ALL.test(text) || qMention != null) {
+      const pool = freshFor(cl => qMention == null || cl.q === qMention);
+      if (pool.length) return share(pool.slice(0, 2)) + (pool.length > 2 ? ' ' + V.more : '');
+      return qMention != null ? V.doneQ : V.done;
+    }
+    // 7. a statement: acknowledge it once
+    return direct ? pick(V.ok, said) : fid === 'f1' ? V.ack : '';
+  }
+
+  root.MEL_SCRIPTED = { reply, VOICES };
+  if (typeof module !== 'undefined' && module.exports) module.exports = root.MEL_SCRIPTED;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
 /* Manager Effect Lab — Gemini API client for the AI teammates.
- * Plain fetch + server-sent events, so it runs in the browser (GitHub Pages) and in Node 18+ (tests). */
+ * Plain fetch + server-sent events, so it runs in the browser (GitHub Pages), in Node 18+ (tests)
+ * and in the optional hosted proxy (worker/worker.mjs), which builds its request with geminiRequest. */
 (function (root) {
   'use strict';
   const BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
@@ -1657,27 +2167,21 @@ HOW TO TAKE PART
     return { code: 'http', status: res.status, reason: info.reason || err.status || '', message: err.message || res.statusText || 'request failed' };
   }
 
-  /**
-   * Stream one teammate reply.
-   * messages: [{role: 'user' | 'assistant', content}], starting and ending with a user turn.
-   * onText(textSoFar) is called as the reply streams in. Resolves {text, finish, usage}.
-   * Rejects with {code: 'cancelled' | 'network' | 'http' | 'refused', status?, reason?, message?}.
-   */
-  async function geminiStream({ apiKey, model, system, messages, signal, onText, thinkingLevel, maxOutputTokens }) {
+  /** The streaming request for one teammate reply: { url, init } for fetch. Shared by the browser and the hosted proxy. */
+  function geminiRequest({ apiKey, model, system, messages, thinkingLevel, maxOutputTokens }) {
     const body = {
       systemInstruction: { parts: [{ text: system }] },
       contents: messages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
       generationConfig: { thinkingConfig: { thinkingLevel: thinkingLevel || 'low' }, maxOutputTokens: maxOutputTokens || 4096 }
     };
-    let res;
-    try {
-      res = await fetch(BASE + encodeURIComponent(model || GEMINI_MODEL) + ':streamGenerateContent?alt=sse', {
-        method: 'POST', headers: { 'x-goog-api-key': apiKey, 'content-type': 'application/json' }, body: JSON.stringify(body), signal
-      });
-    } catch (e) {
-      throw (signal && signal.aborted) ? { code: 'cancelled' } : { code: 'network', message: e.message };
-    }
-    if (!res.ok) throw await httpError(res);
+    return {
+      url: BASE + encodeURIComponent(model || GEMINI_MODEL) + ':streamGenerateContent?alt=sse',
+      init: { method: 'POST', headers: { 'x-goog-api-key': apiKey, 'content-type': 'application/json' }, body: JSON.stringify(body) }
+    };
+  }
+
+  /** Read a Gemini server-sent-event stream. onText(textSoFar) is called as it arrives. Resolves {text, finish, usage}. */
+  async function readStream(res, signal, onText) {
     const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = '', text = '', finish = null, usage = null, blocked = null;
     try {
@@ -1713,16 +2217,42 @@ HOW TO TAKE PART
     return { text, finish, usage };
   }
 
+  async function post(url, init, signal) {
+    try { return await fetch(url, Object.assign({}, init, { signal })); }
+    catch (e) { throw (signal && signal.aborted) ? { code: 'cancelled' } : { code: 'network', message: e.message }; }
+  }
+
+  /**
+   * Stream one teammate reply with the visitor's own key.
+   * messages: [{role: 'user' | 'assistant', content}], starting and ending with a user turn.
+   * Resolves {text, finish, usage}. Rejects with {code: 'cancelled' | 'network' | 'http' | 'refused', status?, reason?, message?}.
+   */
+  async function geminiStream({ apiKey, model, system, messages, signal, onText, thinkingLevel, maxOutputTokens }) {
+    const rq = geminiRequest({ apiKey, model, system, messages, thinkingLevel, maxOutputTokens });
+    const res = await post(rq.url, rq.init, signal);
+    if (!res.ok) throw await httpError(res);
+    return readStream(res, signal, onText);
+  }
+
+  /**
+   * Stream one teammate reply through the hosted proxy (no key in the browser). The proxy builds the
+   * teammate brief from the puzzle and teammate ids, so it can only play these teammates.
+   * Sent as text/plain so the browser needs no CORS preflight.
+   */
+  async function hostedStream({ url, version, puzzle, follower, messages, signal, onText }) {
+    const res = await post(url, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ v: version, puzzle, follower, messages }) }, signal);
+    if (!res.ok) throw await httpError(res);
+    return readStream(res, signal, onText);
+  }
+
   /** Cheap key check: read the model's metadata (no tokens generated). */
   async function geminiCheck(apiKey, model) {
-    let res;
-    try { res = await fetch(BASE + encodeURIComponent(model || GEMINI_MODEL), { headers: { 'x-goog-api-key': apiKey } }); }
-    catch (e) { throw { code: 'network', message: e.message }; }
+    const res = await post(BASE + encodeURIComponent(model || GEMINI_MODEL), { headers: { 'x-goog-api-key': apiKey } });
     if (!res.ok) throw await httpError(res);
     return res.json();
   }
 
-  root.MEL_LLM = { GEMINI_MODEL, geminiStream, geminiCheck };
+  root.MEL_LLM = { GEMINI_MODEL, geminiRequest, geminiStream, hostedStream, geminiCheck };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.MEL_LLM;
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -2397,21 +2927,34 @@ HOW TO TAKE PART
   ];
   // The same app published on claude.ai, where teammates run on the viewer's own Claude account (no key).
   const CLAUDE_URL = 'https://claude.ai/artifact/696yvnhLNTxw2zjFXYXz42';
+  // Hosted AI teammates (worker/worker.mjs): live teammates with no key for visitors. Empty until the
+  // worker is deployed; set it to the worker's URL ending in /reply and the option appears.
+  // On localhost, ?hosted=<url> points at a local stand-in (worker/dev-server.mjs) instead.
+  const HOSTED_DEPLOYED = '';
+  const HOSTED_URL = (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).get('hosted')) || HOSTED_DEPLOYED;
+  const SCR = window.MEL_SCRIPTED, COACH = window.MEL_COACH;
   const FOL = PZ.FOLLOWERS;
   const folName = id => (FOL.find(f => f.id === id) || { name: 'You' }).name;
+  // Quick suits visitors from a LinkedIn post; Standard and Extended add solo warm-ups, which a group comparison needs.
+  const LENGTHS = {
+    quick: { label: 'Quick', time: 'about 10–15 min', desc: '2 team puzzles', warmups: 0, team: ['t1', 't3'] },
+    standard: { label: 'Standard', time: 'about 20–25 min', desc: '1 warm-up and 4 team puzzles', warmups: 1, team: null },
+    extended: { label: 'Extended', time: 'about 30 min', desc: '3 warm-ups and 4 team puzzles', warmups: 3, team: null }
+  };
 
   const AI = {
     sample: null, sampleState: inClaude ? 'checking' : 'absent',
-    settings: Object.assign({ engine: inClaude ? 'claude' : 'gemini', model: 'claude-opus-5-5', minutes: 6, name: '', remember: false, apiKey: '', geminiKey: '' }, store.get('ai.settings', {})),
+    settings: Object.assign({ engine: inClaude ? 'claude' : HOSTED_URL ? 'hosted' : 'scripted', model: 'claude-opus-5-5', minutes: 6, name: '', remember: false, apiKey: '', geminiKey: '' }, store.get('ai.settings', {})),
     phase: 'intro', order: [], idx: 0, results: [], cur: null, notice: '',
     root: () => $('#ai-root')
   };
   if (!AI.settings.remember) { AI.settings.apiKey = ''; AI.settings.geminiKey = ''; }
-  // number of solo warm-up puzzles (older saved settings had a solo on/off switch)
-  if (![0, 1, 3].includes(AI.settings.warmups)) AI.settings.warmups = AI.settings.solo === false ? 0 : 1;
-  delete AI.settings.solo;
-  if (!inClaude && AI.settings.engine === 'claude') AI.settings.engine = 'gemini';
-  if (inClaude && (AI.settings.engine === 'api' || AI.settings.engine === 'gemini')) AI.settings.engine = 'claude';
+  // test length (older saved settings stored the number of warm-ups, or a solo on/off switch)
+  if (!LENGTHS[AI.settings.length]) AI.settings.length = AI.settings.warmups === 3 ? 'extended' : (AI.settings.warmups === 1 || AI.settings.solo === true) ? 'standard' : 'quick';
+  delete AI.settings.warmups; delete AI.settings.solo;
+  if (AI.settings.engine === 'hosted' && !HOSTED_URL) AI.settings.engine = 'scripted';
+  if (!inClaude && AI.settings.engine === 'claude') AI.settings.engine = HOSTED_URL ? 'hosted' : 'scripted';
+  if (inClaude && ['api', 'gemini', 'hosted'].includes(AI.settings.engine)) AI.settings.engine = 'claude';
   if (inClaude) {
     window.claude.use('sample').then(fn => { AI.sample = fn; AI.sampleState = fn ? 'ready' : 'absent'; if (!fn && AI.settings.engine === 'claude') AI.settings.engine = 'scripted'; if (AI.phase === 'intro' && !$('#view-ai-test').hidden) AI.render(); })
       .catch(() => { AI.sampleState = 'absent'; });
@@ -2434,15 +2977,21 @@ HOW TO TAKE PART
       onclick: () => { AI.settings.engine = id; saveSettings(); renderIntro(); } }, h('strong', {}, title), h('span', {}, desc));
   }
 
+  function lengthCard(id) {
+    const L = LENGTHS[id];
+    return h('button', { type: 'button', class: 'engine', 'aria-pressed': AI.settings.length === id ? 'true' : 'false',
+      onclick: () => { AI.settings.length = id; saveSettings(); renderIntro(); } }, h('strong', {}, L.label), h('span', {}, `${L.desc} · ${L.time}`));
+  }
+
   function renderIntro() {
     const st = AI.settings, root = AI.root();
-    const last = store.get('ai.last', null);
+    const last = store.get('ai.last', null), len = LENGTHS[st.length];
     const claudeDesc = AI.sampleState === 'ready' ? 'Teammates run on your Claude account. No key needed; you will be asked to allow it once.' : AI.sampleState === 'checking' ? 'Checking whether this page can use Claude…' : 'Not available in this view.';
+    const ownKey = st.engine === 'gemini' || st.engine === 'api';
     const engines = h('div', { class: 'engine-cards' },
-      inClaude ? engineCard('claude', 'Claude (in claude.ai)', claudeDesc, AI.sampleState !== 'ready') : [
-        engineCard('gemini', 'Gemini 3.8 Flash', 'Recommended. Lifelike teammates on Google\'s Gemini API, with your own key.'),
-        engineCard('api', 'Claude', 'Lifelike teammates on the Anthropic API, with your own key.')],
-      engineCard('scripted', 'No key? Scripted teammates', 'Offline teammates that match keywords in your messages. Fine for a first try; less like real people.'));
+      inClaude ? engineCard('claude', 'Claude (in claude.ai)', claudeDesc, AI.sampleState !== 'ready') : '',
+      !inClaude && HOSTED_URL ? engineCard('hosted', 'Live AI teammates', 'Recommended. Gemini 3.8 Flash, hosted for this test. No key, no sign-up.') : '',
+      engineCard('scripted', 'Scripted teammates', inClaude || HOSTED_URL ? 'Work offline. They follow a script, so they are less lifelike.' : 'No key, no sign-up. They follow a script, so they are less lifelike than AI teammates.'));
     let apiBox = '';
     if (!inClaude && st.engine === 'gemini') {
       const keyStatus = h('p', { class: 'small muted', id: 'key-status' });
@@ -2476,32 +3025,44 @@ HOW TO TAKE PART
     }
     const timeSel = h('select', { id: 'ai-min', onchange: e => { st.minutes = +e.target.value; saveSettings(); } },
       [[4, '4 minutes'], [6, '6 minutes'], [8, '8 minutes'], [0, 'No time limit']].map(([v, l]) => h('option', { value: v, selected: v === st.minutes }, l)));
-    const warmSel = h('select', { id: 'ai-warm', onchange: e => { st.warmups = +e.target.value; saveSettings(); } },
-      [[1, 'Standard · about 20–25 min'], [3, 'Extended · about 30 min'], [0, 'Team puzzles only']].map(([v, l]) => h('option', { value: v, selected: v === st.warmups }, l)));
+    const more = h('details', { class: 'map', open: ownKey || null },
+      h('summary', {}, inClaude ? 'More options: time limit' : 'More options: time limit, your own API key'),
+      h('div', { class: 'flow' },
+        h('div', { class: 'field', style: { maxWidth: '260px' } }, h('label', { for: 'ai-min' }, 'Time per team puzzle'), timeSel),
+        inClaude ? '' : [
+          h('div', { class: 'field' }, h('label', {}, HOSTED_URL ? 'Or run the teammates on your own API key' : 'Lifelike AI teammates with your own API key'),
+            h('div', { class: 'engine-cards' },
+              engineCard('gemini', 'Gemini 3.8 Flash', 'Your own key from Google AI Studio. Getting one takes about a minute.'),
+              engineCard('api', 'Claude', 'Your own Anthropic API key.'))),
+          apiBox,
+          HOSTED_URL ? '' : h('p', { class: 'small muted' }, 'Have a Claude account? The ', h('a', { href: CLAUDE_URL, target: '_blank', rel: 'noopener' }, 'claude.ai version'), ' runs the teammates on your own account, so it needs no key, only a sign-in.')]));
+    const free = st.engine === 'scripted' || st.engine === 'hosted';
+    const startBtn = () => h('button', { class: 'btn primary start-btn', type: 'button', onclick: startTest }, `Start · ${len.time}`);
+    const setup = h('div', { class: 'panel flow', id: 'ai-setup' }, h('h3', {}, 'Start'),
+      h('div', { class: 'field' }, h('label', {}, 'Length'), h('div', { class: 'length-cards' }, Object.keys(LENGTHS).map(lengthCard)),
+        len.warmups ? '' : h('span', { class: 'hint' }, 'To compare a group of people fairly, choose Standard: its warm-up measures how each person reasons alone.')),
+      h('div', { class: 'field' }, h('label', {}, 'Teammates'), engines),
+      AI.notice ? h('p', { class: 'note warn', id: 'ai-notice' }, AI.notice) : '',
+      h('div', { class: 'btn-row' }, startBtn(),
+        last ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''),
+      h('p', { class: 'small muted' }, free ? 'No sign-up and no key. ' : '', 'You can stop after any team puzzle and still get your result.'),
+      more);
     put(root,
       h('div', { class: 'section-head' }, h('div', { class: 'eyebrow' }, 'Leadership test · inspired by Study 2'), h('h2', {}, 'How well do you lead a team?'),
         h('p', {}, 'In a 2025 study, how well people led a team of AI agents strongly predicted how much they improved real human teams. Try a version of that test. You lead three AI teammates, Mira, Theo and Jonas, through hidden-profile puzzles. Each of you holds different clues and nobody can solve a puzzle alone, so your job is to draw out the right information, keep the team on track, and decide.'),
+        // on a phone the set-up panel is far down; offer the start right here
+        h('div', { class: 'btn-row hero-start' }, startBtn(), h('a', { href: '#ai-setup', class: 'small', onclick: e => { e.preventDefault(); $('#ai-setup').scrollIntoView({ behavior: 'smooth' }); } }, 'Choose length and teammates'),
+          h('span', { class: 'small muted' }, `${len.label}, ${st.engine === 'hosted' ? 'live AI' : st.engine === 'scripted' ? 'scripted' : 'AI'} teammates` + (free ? ', no sign-up' : ''))),
         h('p', { class: 'note' }, h('strong', {}, 'For fun, not a verdict. '), 'This version is inspired by the study, not a copy of it: new puzzles, other AI models, fewer puzzles and its own scoring. It has not been validated, so your result describes how you led today\'s game, not how good a manager you are.')),
       h('div', { class: 'grid-2' },
+        setup,
         h('div', { class: 'panel prose' }, h('h3', {}, 'How it works'),
           h('ol', {},
-            h('li', {}, h('strong', {}, 'Warm-up. '), 'A solo puzzle where you see every clue. You learn the answer format and show how you reason on your own.'),
-            h('li', {}, h('strong', {}, 'Four team puzzles. '), 'You see 8 clues; each teammate holds 8 more, half of them shared. Message everyone or one person. Teammates only talk to you.'),
-            h('li', {}, h('strong', {}, 'Answer with probabilities. '), 'Each puzzle has two questions with five options. Clues either rule options out or are irrelevant; the options left standing are equally likely. Spread 100 points across them.'),
+            h('li', {}, h('strong', {}, 'Lead the team. '), 'In each team puzzle you see 8 reports; each teammate holds 8 more, half of them shared. Message everyone or one person. Teammates only talk to you.'),
+            h('li', {}, h('strong', {}, 'Answer with probabilities. '), 'Each puzzle has two questions with five options. Reports either rule options out or are irrelevant; the options left standing are equally likely. Spread 100 points across them.'),
+            h('li', {}, h('strong', {}, 'Get feedback on what you did. '), 'After each puzzle: which questions drew out decisive reports, which reports stayed hidden and who held them, and where your points went.'),
             h('li', {}, h('strong', {}, 'See how you led. '), 'Your score, the leadership habits the study linked to better team results, a playful leadership style, and a result card to share.')),
-          h('p', { class: 'small muted' }, 'Scores run from 0 to 100 (100 = exactly the right distribution; an even split scores 20–60). Everything runs in your browser; nothing is stored on a server.')),
-        h('div', { class: 'panel flow' }, h('h3', {}, 'Set up'),
-          h('div', { class: 'field' }, h('label', {}, 'Teammates'), engines),
-          inClaude ? '' : h('p', { class: 'note good small' }, h('strong', {}, 'Have a Claude account? '), 'Take the test in the ', h('a', { href: CLAUDE_URL, target: '_blank', rel: 'noopener' }, 'claude.ai version'), ' instead. Its teammates run on your own Claude account, so you need no API key.'),
-          apiBox,
-          h('div', { class: 'field' }, h('label', { for: 'ai-warm' }, 'Length'), warmSel,
-            h('span', { class: 'hint' }, 'Standard: 1 warm-up and 4 team puzzles. Extended adds 2 warm-ups for a more precise skill control when comparing a group.')),
-          h('div', { class: 'row' },
-            h('div', { class: 'field' }, h('label', { for: 'ai-min' }, 'Time per team puzzle'), timeSel),
-            h('div', { class: 'field' }, h('label', { for: 'ai-name' }, 'Name or ID ', h('span', { class: 'hint' }, 'optional, for the result card and file')), h('input', { id: 'ai-name', type: 'text', value: st.name, oninput: e => { st.name = e.target.value; saveSettings(); } }))),
-          AI.notice ? h('p', { class: 'note warn' }, AI.notice) : '',
-          h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', type: 'button', onclick: startTest }, 'Start the test'),
-            last ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''))),
+          h('p', { class: 'small muted' }, 'Standard and Extended start with solo warm-ups, where you see every report; they show how you reason on your own. Scores run from 0 to 100 (100 = exactly the right distribution; an even split scores 20–60). Results stay in your browser. AI teammates receive only your chat messages; scripted teammates run entirely in your browser.'))),
       h('details', { class: 'panel', id: 'ai-group-wrap', open: AI.group.leaders.length ? true : null },
         h('summary', { class: 'group-summary' }, h('strong', {}, 'For teams and researchers: compare a group of test takers')),
         h('div', { class: 'flow', id: 'ai-group', style: { marginTop: '14px' } }))
@@ -2510,7 +3071,8 @@ HOW TO TAKE PART
   }
   /* ---- comparing a group (Study 2, models 1–3) ---- */
   AI.group = { leaders: [], files: [], key: null, isExample: false, truth: null, notes: [] };
-  const groupKey = l => l.engine + '|' + l.model + '|' + l.version;
+  // hosted teammates use the same model, brief and settings as Gemini with your own key, so they are pooled
+  const groupKey = l => (l.engine === 'hosted' ? 'gemini' : l.engine) + '|' + l.model + '|' + l.version;
   const groupLabel = k => { const [e, m, v] = k.split('|'); const eng = { gemini: 'Gemini', api: 'Claude API', claude: 'Claude', scripted: 'scripted', simulated: 'simulated' }[e] || e; return `${eng}${m ? ' · ' + m : ''} · test version ${v}`; };
   function addGroupRows(parsed, source) {
     const G = AI.group, rows = S.aiGroupRows(parsed.rows);
@@ -2615,10 +3177,12 @@ HOW TO TAKE PART
   function startTest() {
     const st = AI.settings;
     AI.notice = '';
-    if (st.engine === 'gemini' && !st.geminiKey) { AI.notice = 'Enter your Gemini API key, or choose scripted teammates.'; renderIntro(); return; }
-    if (st.engine === 'api' && !st.apiKey) { AI.notice = 'Enter your Anthropic API key, or choose scripted teammates.'; renderIntro(); return; }
-    if (st.engine === 'claude' && AI.sampleState !== 'ready') { AI.notice = 'Claude is not available in this view. Choose scripted teammates.'; renderIntro(); return; }
-    AI.order = PZ.PUZZLES.filter(p => p.solo).slice(0, st.warmups).concat(PZ.PUZZLES.filter(p => !p.solo)).map(p => p.id);
+    if (st.engine === 'gemini' && !st.geminiKey) { AI.notice = 'Enter your Gemini API key, or choose scripted teammates.'; renderIntro(); }
+    if (st.engine === 'api' && !st.apiKey) { AI.notice = 'Enter your Anthropic API key, or choose scripted teammates.'; renderIntro(); }
+    if (st.engine === 'claude' && AI.sampleState !== 'ready') { AI.notice = 'Claude is not available in this view. Choose scripted teammates.'; renderIntro(); }
+    if (AI.notice) { const n = $('#ai-notice'); if (n) n.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+    const L = LENGTHS[st.length] || LENGTHS.quick;
+    AI.order = PZ.PUZZLES.filter(p => p.solo).slice(0, L.warmups).concat(PZ.PUZZLES.filter(p => !p.solo && (!L.team || L.team.includes(p.id)))).map(p => p.id);
     AI.idx = 0; AI.results = [];
     startPuzzle();
   }
@@ -2683,7 +3247,7 @@ HOW TO TAKE PART
     if (!p.solo) {
       const msgs = $('#msgs');
       c.messages.forEach(m => msgs.append(msgEl(m)));
-      if (!c.messages.length) addSys(c.engine === 'scripted' ? 'Scripted teammates answer by matching keywords in your messages. Ask about topics, options or reports.' : 'Your teammates are online. Say hello, then start gathering information.');
+      if (!c.messages.length) addSys(c.engine === 'scripted' ? 'Your scripted teammates are ready. They pick up names, options, report numbers and topics from your messages.' : 'Your teammates are online. Say hello, then start gathering information.');
       if (c.locked) lockChat();
     }
   }
@@ -2708,7 +3272,7 @@ HOW TO TAKE PART
   function engineLabel() {
     const e = AI.cur ? AI.cur.engine : AI.settings.engine;
     if (e === 'claude') return 'Teammates: Claude';
-    if (e === 'gemini') return 'Teammates: Gemini 3.8 Flash';
+    if (e === 'gemini' || e === 'hosted') return 'Teammates: Gemini 3.8 Flash';
     if (e === 'api') return 'Teammates: ' + (MODELS.find(m => m.id === AI.settings.model) || MODELS[0]).label;
     return 'Teammates: scripted';
   }
@@ -2757,10 +3321,11 @@ HOW TO TAKE PART
         if (err && err.code === 'cancelled') { row.remove(); return; }
         bubble.classList.remove('typing'); bubble.classList.add('err');
         bubbleText.textContent = await engineErrorText(err);
-        if (err && err.fatal && !c.fatalShown) {
+        c.errors = (c.errors || 0) + 1;
+        if (((err && err.fatal) || c.errors >= 3) && !c.fatalShown && c.engine !== 'scripted') {
           c.fatalShown = true;
           const msgs = $('#msgs');
-          if (msgs) { msgs.append(h('div', { class: 'sys' }, 'The teammates cannot reply. ', h('button', { class: 'btn quiet', type: 'button', onclick: e => { c.engine = 'scripted'; AI.settings.engine = 'scripted'; saveSettings(); e.currentTarget.parentElement.replaceWith(h('div', { class: 'sys' }, 'Switched to scripted teammates. Send your message again.')); } }, 'Switch to scripted teammates'))); scrollChat(); }
+          if (msgs) { msgs.append(h('div', { class: 'sys' }, err && err.fatal ? 'The teammates cannot reply. ' : 'Replies keep failing. ', h('button', { class: 'btn quiet', type: 'button', onclick: e => { c.engine = 'scripted'; AI.settings.engine = 'scripted'; saveSettings(); e.currentTarget.parentElement.replaceWith(h('div', { class: 'sys' }, 'Switched to scripted teammates. Send your message again.')); } }, 'Switch to scripted teammates'))); scrollChat(); }
         }
       })
       .finally(() => {
@@ -2795,6 +3360,9 @@ HOW TO TAKE PART
     if (!turns.length || turns[turns.length - 1].role !== 'user') return Promise.reject({ code: 'cancelled' });
     if (c.engine === 'gemini') {
       return LLM.geminiStream({ apiKey: AI.settings.geminiKey, model: LLM.GEMINI_MODEL, system, messages: turns, signal, onText: t => onText(cleanReply(t, fid)) }).then(r => r.text);
+    }
+    if (c.engine === 'hosted') {
+      return LLM.hostedStream({ url: HOSTED_URL, version: PZ.VERSION, puzzle: c.puzzle.id, follower: fid, messages: turns, signal, onText: t => onText(cleanReply(t, fid)) }).then(r => r.text);
     }
     if (c.engine === 'claude') {
       const input = [{ role: 'user', content: system + `\n\nThe chat follows. Reply with ${f.name}'s next chat message only.` }].concat(turns);
@@ -2861,8 +3429,20 @@ HOW TO TAKE PART
     if (st === 400) { if (e) e.fatal = true; return 'Gemini rejected the request: ' + ((e && e.message) || 'bad request'); }
     return 'The reply was interrupted. Ask again.';
   }
+  function hostedErrorText(e) {
+    const code = e && e.code, st = e && e.status, reason = (e && e.reason) || '';
+    if (code === 'refused') return 'No reply to that message. Try rephrasing it.';
+    if (code === 'network') return 'Could not reach the AI teammates. Check your connection and ask again.';
+    if (reason === 'DAILY_LIMIT') { e.fatal = true; return 'The free AI teammates are used up for today. Switch to scripted teammates, or come back tomorrow.'; }
+    if (st === 429) return 'Too many messages at once. Wait a few seconds and ask again.';
+    if (st === 409) { e.fatal = true; return 'This page is out of date. Reload it to continue.'; }
+    if (st === 403 || reason === 'NOT_CONFIGURED') { e.fatal = true; return 'The hosted AI teammates are not available from this page.'; }
+    if (st === 400 || st === 413) return 'That message could not be sent. Try a shorter one.';
+    return 'The AI teammates are busy right now. Ask again in a moment.';
+  }
   async function engineErrorText(e) {
     if (AI.cur && AI.cur.engine === 'gemini') return geminiErrorText(e);
+    if (AI.cur && AI.cur.engine === 'hosted') return hostedErrorText(e);
     if (AI.cur && AI.cur.engine === 'api') {
       const A = AnthropicSDK;
       if (A && (isA(e, 'AuthenticationError') || isA(e, 'PermissionDeniedError') || isA(e, 'NotFoundError') || isA(e, 'BadRequestError'))) e.fatal = true;
@@ -2878,44 +3458,13 @@ HOW TO TAKE PART
     return map[code] || 'The reply was interrupted. Ask again.';
   }
 
-  const STOP = new Set('that this with from have what about your there their they them were been does which would could should into some just than then also more other only very when where know tell think share please team everyone anything something reports report question options option ruled rule help need does help'.split(' '));
-  const stem = w => w.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 6);
-  const toks = t => (String(t).toLowerCase().match(/[a-z0-9]+/g) || []).filter(w => w.length > 3 && !STOP.has(w)).map(stem);
   function scriptedReply(fid, signal) {
-    const c = AI.cur, p = c.puzzle, st = c.followers[fid];
-    let lastOwn = -1;
-    c.messages.forEach((m, i) => { if (m.from === fid) lastOwn = i; });
-    const incoming = c.messages.slice(lastOwn + 1).filter(m => m.from === 'leader' && (m.to === 'all' || m.to === fid));
-    const text = incoming.map(m => m.text).join(' ').toLowerCase();
-    const latest = incoming[incoming.length - 1];
-    if (latest && latest.to === 'all') {
-      const named = FOL.filter(f => new RegExp('\b' + f.name + '\b', 'i').test(latest.text)).map(f => f.id);
-      if (named.length && !named.includes(fid)) return new Promise(resolve => setTimeout(() => resolve(''), 300));
-    }
-    const mine = PZ.cluesFor(p, fid).sort((a, b) => (a.holder === 'public') - (b.holder === 'public'));
-    const unshared = mine.filter(cl => !st.shared.has(cl.num));
-    const asked = new Set(toks(text));
-    const qMention = /(question|q)\s*(1|one)\b|first question/.test(text) ? 0 : /(question|q)\s*(2|two)\b|second question/.test(text) ? 1 : null;
-    const scored = unshared.map(cl => {
-      let sc = 0; toks(cl.text).forEach(t => { if (asked.has(t)) sc += 1; });
-      if (qMention !== null && cl.q === qMention) sc += 1.5;
-      if (new RegExp('#\\s?' + cl.num + '\\b').test(text)) sc += 5;
-      return { cl, sc };
-    });
-    const wantsAll = /\b(all|every|everything|anything|what do you (have|know|got)|your (reports?|clues?|info)|share|send|list)\b/.test(text);
-    let pick = scored.filter(x => x.sc > 0).sort((a, b) => b.sc - a.sc).map(x => x.cl);
-    if (!pick.length && (wantsAll || qMention !== null)) pick = unshared.filter(cl => qMention === null || cl.q === qMention);
-    const out = pick.slice(0, 2);
-    out.forEach(cl => st.shared.add(cl.num));
-    let reply;
-    if (out.length) {
-      reply = out.map(cl => `Report #${cl.num}: ${cl.text}`).join(' ');
-      if (pick.length > 2) reply += ' I have more on this if you want it.';
-    } else if (/^\s*(hi|hello|hey|good (morning|afternoon))\b/.test(text)) reply = 'Hi! Ready when you are.';
-    else if (!unshared.length) reply = 'I have shared everything I have.';
-    else reply = 'I don\'t have anything on that. Ask me about a specific question or option.';
+    const st = AI.cur.followers[fid], shared = new Set(st.shared);
+    const reply = SCR.reply(AI.cur.puzzle, fid, AI.cur.messages, shared);
+    // a typing pause that grows with the length of the reply
+    const wait = reply ? Math.min(2800, 600 + reply.length * 12) * (0.8 + Math.random() * 0.4) : 250;
     return new Promise((resolve, reject) => {
-      const t = setTimeout(() => resolve(reply), 600 + Math.random() * 900);
+      const t = setTimeout(() => { st.shared = shared; resolve(reply); }, wait);
       signal.addEventListener('abort', () => { clearTimeout(t); reject({ code: 'cancelled' }); });
     });
   }
@@ -2942,8 +3491,9 @@ HOW TO TAKE PART
             onclick: () => { c.out[qi][k] = !c.out[qi][k]; evenSplit(qi); renderAnswers(); } }, '✕'))),
         h('div', { class: 'sum', id: `sum-${qi}` }, h('span', {}, `Total ${sum}%`), h('button', { class: 'btn quiet', type: 'button', onclick: () => { evenSplit(qi); renderAnswers(); } }, 'Even split')));
     });
-    put(box, 
+    put(box,
       h('div', { class: 'panel-head' }, h('h3', {}, 'Your answer'), h('span', { class: 'small muted' }, 'Rule options out with ✕')),
+      AI.results.length ? '' : h('p', { class: 'note small' }, h('strong', {}, 'How to answer. '), 'Press ✕ on each option a report rules out; the 100 points then split evenly over the rest. You score highest when the options you keep are exactly the ones still possible.'),
       qBlocks,
       h('p', { class: 'small muted', id: 'ans-msg' }),
       h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', type: 'button', id: 'submit-btn', onclick: submitAnswers }, c.confirm ? 'Confirm and finish' : 'Submit answers')));
@@ -2966,33 +3516,43 @@ HOW TO TAKE PART
     const p = c.puzzle;
     const scores = p.questions.map((q, qi) => S.credenceScore(c.answers[qi], S.correctDist(q.answer, 5)));
     const flat = p.questions.map(q => S.credenceScore([20, 20, 20, 20, 20], S.correctDist(q.answer, 5)));
-    AI.results.push({ id: p.id, version: PZ.VERSION, title: p.title, solo: !!p.solo, scores, flat, answers: c.answers.map(a => a.slice()), seconds: elapsed(), metrics: p.solo ? null : processMetrics(c), transcript: c.messages.slice(), engine: c.engine, model: c.engine === 'api' ? AI.settings.model : c.engine === 'gemini' ? LLM.GEMINI_MODEL : null });
+    const timeLeft = c.deadline ? Math.max(0, (c.deadline - Date.now()) / 1000) : null;
+    const analysis = COACH.analyse(p, c.messages, c.answers, { timeLeft });
+    AI.results.push({ id: p.id, version: PZ.VERSION, title: p.title, solo: !!p.solo, scores, flat, answers: c.answers.map(a => a.slice()), seconds: elapsed(), metrics: p.solo ? null : analysis.metrics, analysis, transcript: c.messages.slice(), engine: c.engine, model: c.engine === 'api' ? AI.settings.model : (c.engine === 'gemini' || c.engine === 'hosted') ? LLM.GEMINI_MODEL : null });
     AI.phase = 'feedback';
     AI.render();
     window.scrollTo(0, 0);
   }
+  // results saved before the feedback analysis existed get it from their transcript
+  function ensureAnalysis(r) {
+    if (r.analysis || r.version !== PZ.VERSION) return r;
+    const p = PZ.PUZZLES.find(x => x.id === r.id);
+    if (!p) return r;
+    r.analysis = COACH.analyse(p, r.transcript || [], r.answers);
+    if (!r.solo) r.metrics = Object.assign({}, r.metrics, r.analysis.metrics);
+    return r;
+  }
 
-  function processMetrics(c) {
-    const L = c.messages.filter(m => m.from === 'leader');
-    const leaderText = L.map(m => m.text).join(' ');
-    const words = (leaderText.match(/\S+/g) || []).length;
-    const questions = L.reduce((n, m) => n + (m.text.match(/\?+/g) || []).length, 0);
-    let turns = 0;
-    for (let i = 1; i < c.messages.length; i++) if ((c.messages[i].from === 'leader') !== (c.messages[i - 1].from === 'leader')) turns++;
-    const we = (leaderText.match(/\b(we|us|our|ours|ourselves|let's|lets)\b/gi) || []).length;
-    const critical = PZ.criticalFollowerClues(c.puzzle);
-    const surfacedNums = new Set();
-    c.messages.filter(m => m.from !== 'leader').forEach(m => {
-      const re = /(?:#\s?|report\s+(?:no\.?\s*)?#?\s?)(\d{1,2})\b/gi; let mm;
-      while ((mm = re.exec(m.text))) { const n = +mm[1]; const cl = critical.find(x => x.num === n && x.holder === m.from); if (cl) surfacedNums.add(n); }
-    });
-    return { leaderMessages: L.length, words, questions, turns, weRate: words ? 100 * we / words : 0, engaged: new Set(c.messages.filter(m => m.from !== 'leader').map(m => m.from)).size, surfaced: surfacedNums.size, critical: critical.length, broadcast: L.filter(m => m.to === 'all').length };
+  /** Stacked bar: the score, points lost in using the reports, points lost to reports that stayed hidden. */
+  function pointsSplit(info, solo) {
+    const sc = Math.round(info.actual), use = Math.round(info.use), hid = Math.max(0, 100 - sc - use);
+    const segs = solo ? [['score', sc, 'Your score'], ['use', 100 - sc, 'lost in reasoning']] : [['score', sc, 'Your score'], ['use', use, 'lost in using the reports you had'], ['hidden', hid, 'lost to reports that stayed hidden']];
+    return h('div', { class: 'split' },
+      h('div', { class: 'split-bar', role: 'img', 'aria-label': segs.map(([, v, l]) => l === 'Your score' ? `Score ${v}` : `${v} points ${l}`).join('; ') },
+        segs.map(([k, v]) => h('div', { class: 'seg-' + k, style: { width: v + '%' } }))),
+      h('div', { class: 'legend' }, segs.map(([k, v, l]) => h('span', {}, h('i', { class: 'bar seg-' + k }), l === 'Your score' ? `${l}: ${v}` : `${v} ${l}`))));
+  }
+  function obsLists(good, tips, goodTitle, tipTitle) {
+    const item = o => h('li', {}, o.puzzle ? h('span', { class: 'obs-where' }, o.puzzle + ': ') : '', o.text);
+    return h('div', { class: 'obs' },
+      h('div', {}, h('h4', {}, goodTitle || 'What worked'), good.length ? h('ul', { class: 'obs-list good' }, good.map(item)) : h('p', { class: 'small muted' }, 'Nothing stood out this time.')),
+      h('div', {}, h('h4', {}, tipTitle || 'Try next time'), tips.length ? h('ul', { class: 'obs-list next' }, tips.map(item)) : h('p', { class: 'small muted' }, 'Nothing to fix here.')));
   }
 
   /* ---- feedback ---- */
   function renderFeedback() {
-    const r = AI.results[AI.results.length - 1], p = PZ.PUZZLES.find(x => x.id === r.id), root = AI.root();
-    const L = 'ABCDE';
+    const r = ensureAnalysis(AI.results[AI.results.length - 1]), p = PZ.PUZZLES.find(x => x.id === r.id), root = AI.root();
+    const A = r.analysis, L = 'ABCDE';
     const holderName = cl => cl.holder === 'leader' ? 'you' : cl.holder === 'public' ? 'everyone' : p.solo ? '' : folName(cl.holder);
     const qCards = p.questions.map((q, qi) => {
       const correct = S.correctDist(q.answer, 5);
@@ -3008,24 +3568,32 @@ HOW TO TAKE PART
         h('ul', { class: 'explain' }, [...groups.values()].map(cls => h('li', {},
           cls[0].rules.map(i => q.options[i]).join(' and ') + ' ruled out by ' +
           cls.map(cl => `report #${cl.num}` + (p.solo ? '' : ` (${holderName(cl)})`)).join(' + ') + (cls.length > 1 ? ' together' : '') + '.'))),
-        h('p', { class: 'small muted' }, `An even split would have scored ${Math.round(r.flat[qi])}.`));
+        h('p', { class: 'small muted' }, `An even split would have scored ${Math.round(r.flat[qi])}` + (p.solo || !A ? '.' : `; the best answer possible with the reports you gathered, ${Math.round(A.info.perQ[qi].best)}.`)));
     });
     const m = r.metrics;
-    const last = AI.idx >= AI.order.length - 1;
-    put(root, 
+    const last = AI.idx >= AI.order.length - 1, teamDone = AI.results.filter(x => !x.solo).length;
+    const obs = A ? COACH.top(A.observations, 2, 3) : { good: [], tips: [] };
+    const time = Math.floor(r.seconds / 60) + ':' + String(r.seconds % 60).padStart(2, '0');
+    const how = !A ? '' : m ? h('div', { class: 'panel flow' },
+      h('h3', {}, 'How you led'),
+      pointsSplit(A.info),
+      obsLists(obs.good, obs.tips),
+      h('div', { class: 'stats' },
+        h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Hidden reports surfaced'), h('span', { class: 'value' }, `${m.surfaced} of ${m.critical}`), h('span', { class: 'sub' }, 'decisive reports your teammates passed on')),
+        h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Questions'), h('span', { class: 'value' }, m.questions), h('span', { class: 'sub' }, `${m.targeted} specific · ${m.generic} general · ${m.repeats} repeated`)),
+        h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Follow-ups'), h('span', { class: 'value' }, m.followUps), h('span', { class: 'sub' }, `built on a teammate's answer` + (m.connects ? ` · ${m.connects} passed on to others` : ''))),
+        h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Asked directly'), h('span', { class: 'value' }, `${m.askedDirect.length} of 3`), h('span', { class: 'sub' }, m.askedDirect.length ? m.askedDirect.map(folName).join(', ') : 'only messages to everyone')),
+        h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Time used'), h('span', { class: 'value' }, time), h('span', { class: 'sub' }, `${m.turns} turns · ${m.words} words`))),
+      h('p', { class: 'small muted' }, 'In Study 2, leaders who asked more questions and had more back-and-forth did better with both AI and human teams; the sheer number of words did not matter. Here a question counts as specific when it names an option, a report number or a detail from the reports.'))
+      : h('div', { class: 'panel flow' }, h('h3', {}, 'How you reasoned'), pointsSplit(A.info, true), obsLists(obs.good, obs.tips),
+        h('p', { class: 'small muted' }, 'In the warm-up you see every report, so any points lost come from reasoning, not from missing information.'));
+    put(root,
       h('div', { class: 'ai-top' }, h('div', {}, h('div', { class: 'eyebrow' }, `Puzzle ${AI.idx + 1} of ${AI.order.length} · result`), h('h2', {}, p.title)),
-        h('button', { class: 'btn primary', type: 'button', onclick: () => { if (last) { finishTest(); } else { AI.idx++; startPuzzle(); } } }, last ? 'See your results' : 'Next puzzle')),
-      h('div', { class: 'grid-2' }, qCards),
-      m ? h('div', { class: 'panel' },
-        h('h3', {}, 'How you led'),
-        h('div', { class: 'stats' },
-          h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Hidden information surfaced'), h('span', { class: 'value' }, `${m.surfaced} of ${m.critical}`), h('span', { class: 'sub' }, 'decisive reports your teammates passed on')),
-          h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Questions asked'), h('span', { class: 'value' }, m.questions), h('span', { class: 'sub' }, `${m.leaderMessages} messages, ${m.words} words`)),
-          h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Conversational turns'), h('span', { class: 'value' }, m.turns), h('span', { class: 'sub' }, `${m.engaged} of 3 teammates replied`)),
-          h('div', { class: 'stat' }, h('span', { class: 'label' }, '"We" language'), h('span', { class: 'value' }, fmt(m.weRate, 1)), h('span', { class: 'sub' }, 'per 100 words')),
-          h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Time used'), h('span', { class: 'value' }, Math.floor(r.seconds / 60) + ':' + String(r.seconds % 60).padStart(2, '0')), h('span', { class: 'sub' }, 'minutes:seconds'))),
-        h('p', { class: 'small muted' }, 'In Study 2, leaders who asked more questions and had more back-and-forth did better with both AI and human teams; the sheer number of words did not matter.')) : ''
-    );
+        h('div', { class: 'btn-row' },
+          !last && teamDone ? h('button', { class: 'btn quiet', type: 'button', onclick: finishTest }, 'Stop here and see results') : '',
+          h('button', { class: 'btn primary', type: 'button', onclick: () => { if (last) { finishTest(); } else { AI.idx++; startPuzzle(); } } }, last ? 'See your results' : 'Next puzzle'))),
+      how,
+      h('div', { class: 'grid-2' }, qCards));
   }
 
   function finishTest() {
@@ -3036,35 +3604,39 @@ HOW TO TAKE PART
   }
 
   function summaryNumbers(results) {
+    results.forEach(ensureAnalysis);
     const team = results.filter(r => !r.solo), solo = results.filter(r => r.solo);
     const all = team.flatMap(r => r.scores), soloAll = solo.flatMap(r => r.scores);
     const solved = all.filter(x => x >= 95).length;
-    const avg = k => team.length ? S.mean(team.map(r => r.metrics[k])) : NaN;
     // rough 95% range for the raw score, treating puzzles as the units of measurement
     const per = team.map(r => S.mean(r.scores));
     let teamLo = NaN, teamHi = NaN;
-    if (per.length >= 2) { const half = S.tCrit(per.length - 1) * S.sd(per) / Math.sqrt(per.length); teamLo = Math.max(0, S.mean(per) - half); teamHi = Math.min(100, S.mean(per) + half); }
-    return { team, solo, teamScore: all.length ? S.mean(all) : NaN, teamLo, teamHi, solved, nq: all.length, soloScore: soloAll.length ? S.mean(soloAll) : NaN, soloN: soloAll.length,
-      surfaced: team.reduce((n, r) => n + r.metrics.surfaced, 0), critical: team.reduce((n, r) => n + r.metrics.critical, 0),
-      questions: avg('questions'), turns: avg('turns'), words: avg('words'), weRate: avg('weRate') };
+    // (with two puzzles the t interval spans almost 0–100 and says nothing, so it needs three or more)
+    if (per.length >= 3) { const half = S.tCrit(per.length - 1) * S.sd(per) / Math.sqrt(per.length); teamLo = Math.max(0, S.mean(per) - half); teamHi = Math.min(100, S.mean(per) + half); }
+    const C = COACH.summarise(results);
+    return Object.assign({ team, solo, teamScore: all.length ? S.mean(all) : NaN, teamLo, teamHi, solved, nq: all.length, soloScore: soloAll.length ? S.mean(soloAll) : NaN, soloN: soloAll.length },
+      C.totals, { strengths: C.strengths, tips: C.tips });
   }
   /* ---- results: habits, a playful style, and a card to share ---- */
   const APP_URL = 'https://lstehlik2809.github.io/manager-effect-lab/';
   const RATING = { strong: 'Strong', some: 'Some', little: 'Little' };
-  // Rough thresholds for these puzzles (5–6 decisive hidden clues each), not norms.
+  const pctText = x => (isFinite(x) ? Math.round(100 * x) + '%' : '–');
+  // Rough thresholds for these puzzles (5–6 decisive hidden clues each), not norms. Specific questions
+  // count fully, general ones half and repeats not at all, so asking the same thing again earns nothing.
   function habits(N) {
     const rate = (v, strong, some) => (!isFinite(v) ? 'little' : v >= strong ? 'strong' : v >= some ? 'some' : 'little');
     const info = N.critical ? N.surfaced / N.critical : NaN;
     return [
-      { label: 'Asking questions', value: `${fmt(N.questions, 1)} per puzzle`, rating: rate(N.questions, 4, 2), note: 'Leaders who asked more questions got better results, with AI and with human teams.' },
-      { label: 'Back-and-forth', value: `${fmt(N.turns, 1)} turns per puzzle`, rating: rate(N.turns, 10, 5), note: 'More conversational turn-taking went with better team results.' },
+      { label: 'Asking questions', value: `${fmt(N.targeted + N.generic, 1)} per puzzle, ${pctText(N.targetedShare)} specific`, rating: rate(N.targeted + 0.5 * N.generic, 4, 2), note: 'Leaders who asked more questions got better results, with AI and with human teams. Specific questions count fully here, general ones half, repeats not at all.' },
+      { label: 'Back-and-forth', value: `${fmt(N.followUps, 1)} follow-ups per puzzle`, rating: rate(N.followUps, 2, 1), note: 'More conversational turn-taking went with better team results. Here it counts the times you built on what a teammate said.' },
       { label: 'Drawing out hidden clues', value: `${N.surfaced} of ${N.critical} decisive clues`, rating: rate(info, 0.75, 0.4), note: 'Weak leaders learned little from their team: their answers looked like uninformed guesses.' }
     ];
   }
-  function leaderStyle(hb) {
-    const [q, t, i] = hb.map(x => x.rating);
-    if (i === 'strong' && (q === 'strong' || t === 'strong')) return { name: 'The Facilitator', text: 'You asked, listened and pulled out what each teammate knew. That is the pattern Study 2 linked to the most effective leaders.' };
-    if (i === 'strong') return { name: 'The Collector', text: 'You got most of the hidden clues out, often by asking for everything at once. Sharper, targeted questions can get you there faster.' };
+  function leaderStyle(hb, N) {
+    const [q, t, i] = hb.map(x => x.rating), general = !(N.targetedShare >= 0.35);
+    if (i === 'strong' && (q === 'strong' || t === 'strong') && !general) return { name: 'The Facilitator', text: 'You asked specific questions, built on the answers and pulled out what each teammate knew. That is the pattern Study 2 linked to the most effective leaders.' };
+    if (i === 'strong') return { name: 'The Collector', text: general ? 'You got most of the hidden clues out, mostly by asking for everything at once. Questions about the options still standing get there faster.' : 'You got most of the hidden clues out with few questions. Building on what teammates say would make it quicker and surer.' };
+    if (N.repeats >= 1.5) return { name: 'The Broadcaster', text: 'You asked the team for everything, often more than once. Teammates share a couple of reports at a time, so specific follow-ups would have drawn out more.' };
     if (q === 'strong' || t === 'strong') return { name: 'The Explorer', text: 'You kept the conversation going, but some decisive clues stayed hidden. Ask each teammate directly about the options still standing.' };
     if (i === 'little' && q === 'little') return { name: 'The Lone Solver', text: 'You leaned on your own clues. Most decisive clues sat with your teammates, so draw them out before you decide.' };
     return { name: 'The Coordinator', text: 'You kept the team moving and got part of the picture. A few more follow-up questions would surface the rest.' };
@@ -3126,27 +3698,33 @@ HOW TO TAKE PART
 
   function renderSummary() {
     const R = AI.results, root = AI.root(), N = summaryNumbers(R), name = (AI.settings.name || '').trim();
+    const cell = (r, f) => h('td', { class: 'num' }, r.metrics && r.metrics[f] != null ? r.metrics[f] : '–');
     const rows = R.map(r => h('tr', {},
       h('td', {}, r.title + (r.solo ? ' (solo)' : '')), h('td', { class: 'num' }, Math.round(r.scores[0])), h('td', { class: 'num' }, Math.round(r.scores[1])),
-      h('td', { class: 'num' }, r.metrics ? `${r.metrics.surfaced}/${r.metrics.critical}` : '–'), h('td', { class: 'num' }, r.metrics ? r.metrics.questions : '–'),
-      h('td', { class: 'num' }, r.metrics ? r.metrics.turns : '–'), h('td', { class: 'num' }, r.metrics ? r.metrics.words : '–'),
+      h('td', { class: 'num' }, r.metrics ? `${r.metrics.surfaced}/${r.metrics.critical}` : '–'), cell(r, 'questions'), cell(r, 'targeted'), cell(r, 'repeats'), cell(r, 'followUps'),
+      cell(r, 'turns'), cell(r, 'words'),
       h('td', { class: 'num' }, Math.floor(r.seconds / 60) + ':' + String(r.seconds % 60).padStart(2, '0'))));
     const head = h('div', { class: 'section-head' }, h('div', { class: 'eyebrow' }, 'Your result' + (name ? ' · ' + name : '')), h('h2', {}, 'How you led your AI team'));
     const again = h('button', { class: 'btn quiet', type: 'button', onclick: () => { AI.phase = 'intro'; AI.render(); } }, 'Take the test again');
     if (!N.team.length) { put(root, head, h('div', { class: 'panel' }, h('p', {}, 'Complete the team puzzles to see a result.'), again)); return; }
-    const hb = habits(N), style = leaderStyle(hb);
+    const hb = habits(N), style = leaderStyle(hb, N);
     const pct = N.nq ? Math.round(100 * N.solved / N.nq) : 0;
     const range = rangeText(N);
     const toGroup = e => { e.preventDefault(); AI.phase = 'intro'; AI.render(); setTimeout(() => { const w = $('#ai-group-wrap'); if (w) { w.open = true; w.scrollIntoView({ behavior: 'smooth' }); } }, 30); };
     const shareStatus = h('span', { class: 'small muted', 'aria-live': 'polite' });
     const cardBox = h('div', { class: 'card-preview' }, h('span', { class: 'small muted' }, 'Drawing your result card…'));
-    let canvas = null;
+    let canvas = null, nameTimer = null;
     const text = shareText(N, style);
     put(root, head,
       h('div', { class: 'panel flow' },
         h('div', { class: 'result-hero' },
           h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Team-puzzle score'), h('span', { class: 'value big' }, Math.round(N.teamScore), h('span', { class: 'small muted' }, ' / 100')), h('span', { class: 'sub' }, `mean of ${N.nq} questions` + (range ? ' · ' + range : ''))),
           h('div', { class: 'style-box' }, h('span', { class: 'eyebrow' }, 'Your leadership style · for fun'), h('h3', {}, style.name), h('p', {}, style.text))),
+        h('h3', {}, 'What you did, specifically'),
+        obsLists(N.strengths, N.tips, 'What you did well', 'Try next time'),
+        h('h3', {}, 'Where your points went'),
+        pointsSplit({ actual: N.teamScore, use: N.use, hidden: N.hidden }),
+        h('p', { class: 'small muted' }, 'Points lost to reports that stayed hidden reflect leading: drawing out what your teammates knew. Points lost in using the reports you had reflect reasoning. A report counts as drawn out only when a teammate cited its number, so the hidden part can be overstated if teammates paraphrased.'),
         h('h3', {}, 'The habits behind good leadership'),
         h('p', { class: 'small muted' }, 'In Study 2, these behaviours separated effective leaders from the rest. Ratings use rough thresholds set for these puzzles, not norms.'),
         h('div', { class: 'habits' }, hb.map(x => h('div', { class: 'habit' },
@@ -3157,6 +3735,8 @@ HOW TO TAKE PART
         h('p', { class: 'verdict small' }, interpret(N))),
       h('div', { class: 'panel flow' },
         h('div', { class: 'panel-head' }, h('h3', {}, 'Share your result'), h('p', {}, 'Image sized for a LinkedIn post')),
+        h('div', { class: 'field', style: { maxWidth: '320px' } }, h('label', { for: 'ai-name' }, 'Name on the card ', h('span', { class: 'hint' }, 'optional')),
+          h('input', { id: 'ai-name', type: 'text', value: AI.settings.name, autocomplete: 'given-name', oninput: e => { AI.settings.name = e.target.value; saveSettings(); clearTimeout(nameTimer); nameTimer = setTimeout(redraw, 350); } })),
         cardBox,
         h('div', { class: 'btn-row' },
           // a real link: scripted pop-ups are blocked for most viewers of the claude.ai version
@@ -3166,12 +3746,13 @@ HOW TO TAKE PART
           shareStatus),
         h('p', { class: 'small muted' }, '"Share on LinkedIn" copies a short text for your post and opens LinkedIn with a link to this test. Attach the result card if you like. Nothing is shared until you post it.')),
       h('div', { class: 'panel' }, h('h3', {}, 'Puzzle by puzzle'),
-        h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Puzzle', 'Q1', 'Q2', 'Clues surfaced', 'Questions', 'Turns', 'Words', 'Time'].map((t, i) => h('th', { class: i ? 'num' : '' }, t)))), h('tbody', {}, rows))),
+        h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Puzzle', 'Q1', 'Q2', 'Clues surfaced', 'Questions', 'Specific', 'Repeated', 'Follow-ups', 'Turns', 'Words', 'Time'].map((t, i) => h('th', { class: i ? 'num' : '' }, t)))), h('tbody', {}, rows))),
         h('p', { class: 'small muted' }, `Questions solved (score of 95 or more): ${N.solved} of ${N.nq} (${pct}%). Solo warm-up score: ${isFinite(N.soloScore) ? Math.round(N.soloScore) + ' (mean of ' + N.soloN + ' questions)' : 'skipped'}. "We" language: ${fmt(N.weRate, 1)} per 100 words.`)),
       h('details', { class: 'panel prose' }, h('summary', { class: 'group-summary' }, h('strong', {}, 'How to read this')),
         h('ul', {},
-          h('li', {}, 'Your team-puzzle score is raw. It mixes how well you led with how well you reason on your own, and four puzzles is a small sample. Study 2 measured leadership as team results after controlling for hard skills (three solo puzzles, fluid IQ and typing speed), standardised across its 249 leaders. One person\'s score can do neither.'),
+          h('li', {}, `Your team-puzzle score is raw. It mixes how well you led with how well you reason on your own, and ${sampleText(N)} is a small sample. Study 2 measured leadership as team results after controlling for hard skills (three solo puzzles, fluid IQ and typing speed), standardised across its 249 leaders. One person's score can do neither.`),
           h('li', {}, 'The leadership style is a playful summary of the three habits above, not a validated type.'),
+          h('li', {}, 'The feedback reads your chat with simple rules. A question counts as specific when it names an option, a report number or a detail from the reports; a follow-up picks up something a teammate said; a repeat asks the same people the same thing again. Unusual phrasing can be misread.'),
           h('li', {}, 'To compare people properly, collect the results files of a group who took the same version with the same teammates and load them under ', h('a', { href: '#ai-test', onclick: toGroup }, 'compare a group of test takers'), ' on the start screen.'),
           h('li', {}, 'In Study 2, leaders 1 SD above average gave optimal answers to 53% of questions and leaders 1 SD below average to 10%, averaged over its AI and human versions. Those figures belong to the study\'s own puzzles, GPT-4o teammates and sample. They are not benchmarks for this version.'),
           h('li', {}, '"Clues surfaced" counts a decisive clue only when a teammate cites its report number, so it undercounts if teammates paraphrase.'),
@@ -3180,25 +3761,29 @@ HOW TO TAKE PART
         h('button', { class: 'btn', type: 'button', onclick: () => exportAI('csv') }, 'Download results (CSV)'),
         h('button', { class: 'btn', type: 'button', onclick: () => exportAI('json') }, 'Download with transcripts (JSON)'),
         again));
-    drawCard(N, hb, style, name).then(c => {
-      canvas = c;
-      put(cardBox, h('img', { src: c.toDataURL('image/png'), alt: `Result card: team score ${Math.round(N.teamScore)} out of 100, leadership style ${style.name}, ${hb.map(x => x.label + ' ' + RATING[x.rating].toLowerCase()).join(', ')}.` }));
-    }).catch(() => put(cardBox, h('span', { class: 'small muted' }, 'The result card could not be drawn in this browser.')));
+    function redraw() {
+      drawCard(N, hb, style, (AI.settings.name || '').trim()).then(c => {
+        canvas = c;
+        put(cardBox, h('img', { src: c.toDataURL('image/png'), alt: `Result card: team score ${Math.round(N.teamScore)} out of 100, leadership style ${style.name}, ${hb.map(x => x.label + ' ' + RATING[x.rating].toLowerCase()).join(', ')}.` }));
+      }).catch(() => put(cardBox, h('span', { class: 'small muted' }, 'The result card could not be drawn in this browser.')));
+    }
+    redraw();
   }
   const rangeText = N => (isFinite(N.teamLo) && Math.round(N.teamHi) > Math.round(N.teamLo) ? `rough 95% range ${Math.round(N.teamLo)}–${Math.round(N.teamHi)}` : '');
+  const sampleText = N => (['no', 'one', 'two', 'three', 'four'][N.team.length] || N.team.length) + ' team puzzle' + (N.team.length === 1 ? '' : 's');
   function interpret(N) {
     if (!N.team.length) return 'Complete the team puzzles to see a result.';
-    return 'Your score describes this game only: it mixes how well you led with how well you reason on your own, and four puzzles is a small sample' +
+    return `Your score describes this game only: it mixes how well you led with how well you reason on your own, and ${sampleText(N)} is a small sample` +
       (rangeText(N) ? ` (${rangeText(N)})` : '') +
       '. There are no norms for this version, so it cannot say how you compare with the leaders in Study 2 or with other people.' +
-      (N.soloN ? '' : ' You skipped the warm-up, so this result cannot be adjusted for reasoning skill in a group comparison.');
+      (N.soloN ? '' : ' Without a warm-up this result cannot be adjusted for reasoning skill in a group comparison; the Standard length includes one.');
   }
   function exportAI(kind) {
     const R = AI.results, N = summaryNumbers(R), name = AI.settings.name || '';
     const uniq = xs => [...new Set(xs.filter(Boolean))].join('+');
     const engine = uniq(R.map(r => r.engine)), model = uniq(R.map(r => r.model)), version = R[0] && R[0].version || 1;
-    if (kind === 'json') { offerFile('ai_leadership_test.json', JSON.stringify({ name, finished: new Date().toISOString(), test_version: version, summary: N.team.length ? { team_score: N.teamScore, team_score_range: [N.teamLo, N.teamHi], solved: N.solved, questions: N.nq, solo_score: N.soloScore, solo_questions: N.soloN } : null, puzzles: R }, null, 2), 'application/json'); return; }
-    const row = { name, finished: new Date().toISOString(), test_version: version, engine, model, team_score: fmt(N.teamScore, 2), team_score_low: fmt(N.teamLo, 2), team_score_high: fmt(N.teamHi, 2), questions_solved: N.solved, questions: N.nq, solo_score: fmt(N.soloScore, 2), solo_questions: N.soloN, info_surfaced: N.surfaced, info_total: N.critical, questions_per_puzzle: fmt(N.questions, 2), turns_per_puzzle: fmt(N.turns, 2), words_per_puzzle: fmt(N.words, 1), we_per_100_words: fmt(N.weRate, 2) };
+    if (kind === 'json') { offerFile('ai_leadership_test.json', JSON.stringify({ name, finished: new Date().toISOString(), test_version: version, summary: N.team.length ? { team_score: N.teamScore, team_score_range: [N.teamLo, N.teamHi], solved: N.solved, questions: N.nq, solo_score: N.soloScore, solo_questions: N.soloN, points_lost_hidden: N.hidden, points_lost_use: N.use } : null, puzzles: R }, null, 2), 'application/json'); return; }
+    const row = { name, finished: new Date().toISOString(), test_version: version, engine, model, team_score: fmt(N.teamScore, 2), team_score_low: fmt(N.teamLo, 2), team_score_high: fmt(N.teamHi, 2), questions_solved: N.solved, questions: N.nq, solo_score: fmt(N.soloScore, 2), solo_questions: N.soloN, info_surfaced: N.surfaced, info_total: N.critical, questions_per_puzzle: fmt(N.questions, 2), specific_questions_per_puzzle: fmt(N.targeted, 2), repeated_questions_per_puzzle: fmt(N.repeats, 2), followups_per_puzzle: fmt(N.followUps, 2), turns_per_puzzle: fmt(N.turns, 2), words_per_puzzle: fmt(N.words, 1), we_per_100_words: fmt(N.weRate, 2), points_lost_hidden: fmt(N.hidden, 2), points_lost_use: fmt(N.use, 2) };
     R.forEach(r => { row[r.id + '_q1'] = fmt(r.scores[0], 1); row[r.id + '_q2'] = fmt(r.scores[1], 1); });
     offerFile('ai_leadership_test.csv', toCSV(Object.keys(row), [row]).replace(/−/g, '-'), 'text/csv');
   }

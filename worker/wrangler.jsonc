@@ -1,0 +1,21 @@
+// Hosted AI teammates: lets visitors take the test with live AI teammates and no API key.
+// Deploy:  npx wrangler@4.145.0 secret put GEMINI_API_KEY   then   npx wrangler@4.145.0 deploy
+// Then set HOSTED_URL in src/app.js to the worker's URL + /reply and run npm run build.
+{
+  "name": "manager-effect-lab-teammates",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {
+    // pages allowed to call the worker (the GitHub Pages app and the local preview)
+    "ALLOWED_ORIGINS": "https://lstehlik2809.github.io,http://127.0.0.1:8765,http://localhost:8765",
+    // requests per UTC day for everyone together; a quick test makes roughly 40–120, a standard one 100–250
+    "DAILY_LIMIT": "4000"
+  },
+  // requests per visitor IP per minute (a message to everyone is three requests)
+  "ratelimits": [{ "name": "PER_VISITOR", "namespace_id": "4801", "simple": { "limit": 60, "period": 60 } }],
+  "durable_objects": { "bindings": [{ "name": "BUDGET", "class_name": "DailyBudget" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DailyBudget"] }],
+  "observability": { "enabled": true }
+}

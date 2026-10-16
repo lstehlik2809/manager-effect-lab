@@ -1,5 +1,6 @@
 /* Manager Effect Lab — Gemini API client for the AI teammates.
- * Plain fetch + server-sent events, so it runs in the browser (GitHub Pages) and in Node 18+ (tests). */
+ * Plain fetch + server-sent events, so it runs in the browser (GitHub Pages), in Node 18+ (tests)
+ * and in the optional hosted proxy (worker/worker.mjs), which builds its request with geminiRequest. */
 (function (root) {
   'use strict';
   const BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
@@ -12,27 +13,21 @@
     return { code: 'http', status: res.status, reason: info.reason || err.status || '', message: err.message || res.statusText || 'request failed' };
   }
 
-  /**
-   * Stream one teammate reply.
-   * messages: [{role: 'user' | 'assistant', content}], starting and ending with a user turn.
-   * onText(textSoFar) is called as the reply streams in. Resolves {text, finish, usage}.
-   * Rejects with {code: 'cancelled' | 'network' | 'http' | 'refused', status?, reason?, message?}.
-   */
-  async function geminiStream({ apiKey, model, system, messages, signal, onText, thinkingLevel, maxOutputTokens }) {
+  /** The streaming request for one teammate reply: { url, init } for fetch. Shared by the browser and the hosted proxy. */
+  function geminiRequest({ apiKey, model, system, messages, thinkingLevel, maxOutputTokens }) {
     const body = {
       systemInstruction: { parts: [{ text: system }] },
       contents: messages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
       generationConfig: { thinkingConfig: { thinkingLevel: thinkingLevel || 'low' }, maxOutputTokens: maxOutputTokens || 4096 }
     };
-    let res;
-    try {
-      res = await fetch(BASE + encodeURIComponent(model || GEMINI_MODEL) + ':streamGenerateContent?alt=sse', {
-        method: 'POST', headers: { 'x-goog-api-key': apiKey, 'content-type': 'application/json' }, body: JSON.stringify(body), signal
-      });
-    } catch (e) {
-      throw (signal && signal.aborted) ? { code: 'cancelled' } : { code: 'network', message: e.message };
-    }
-    if (!res.ok) throw await httpError(res);
+    return {
+      url: BASE + encodeURIComponent(model || GEMINI_MODEL) + ':streamGenerateContent?alt=sse',
+      init: { method: 'POST', headers: { 'x-goog-api-key': apiKey, 'content-type': 'application/json' }, body: JSON.stringify(body) }
+    };
+  }
+
+  /** Read a Gemini server-sent-event stream. onText(textSoFar) is called as it arrives. Resolves {text, finish, usage}. */
+  async function readStream(res, signal, onText) {
     const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = '', text = '', finish = null, usage = null, blocked = null;
     try {
@@ -68,15 +63,41 @@
     return { text, finish, usage };
   }
 
+  async function post(url, init, signal) {
+    try { return await fetch(url, Object.assign({}, init, { signal })); }
+    catch (e) { throw (signal && signal.aborted) ? { code: 'cancelled' } : { code: 'network', message: e.message }; }
+  }
+
+  /**
+   * Stream one teammate reply with the visitor's own key.
+   * messages: [{role: 'user' | 'assistant', content}], starting and ending with a user turn.
+   * Resolves {text, finish, usage}. Rejects with {code: 'cancelled' | 'network' | 'http' | 'refused', status?, reason?, message?}.
+   */
+  async function geminiStream({ apiKey, model, system, messages, signal, onText, thinkingLevel, maxOutputTokens }) {
+    const rq = geminiRequest({ apiKey, model, system, messages, thinkingLevel, maxOutputTokens });
+    const res = await post(rq.url, rq.init, signal);
+    if (!res.ok) throw await httpError(res);
+    return readStream(res, signal, onText);
+  }
+
+  /**
+   * Stream one teammate reply through the hosted proxy (no key in the browser). The proxy builds the
+   * teammate brief from the puzzle and teammate ids, so it can only play these teammates.
+   * Sent as text/plain so the browser needs no CORS preflight.
+   */
+  async function hostedStream({ url, version, puzzle, follower, messages, signal, onText }) {
+    const res = await post(url, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ v: version, puzzle, follower, messages }) }, signal);
+    if (!res.ok) throw await httpError(res);
+    return readStream(res, signal, onText);
+  }
+
   /** Cheap key check: read the model's metadata (no tokens generated). */
   async function geminiCheck(apiKey, model) {
-    let res;
-    try { res = await fetch(BASE + encodeURIComponent(model || GEMINI_MODEL), { headers: { 'x-goog-api-key': apiKey } }); }
-    catch (e) { throw { code: 'network', message: e.message }; }
+    const res = await post(BASE + encodeURIComponent(model || GEMINI_MODEL), { headers: { 'x-goog-api-key': apiKey } });
     if (!res.ok) throw await httpError(res);
     return res.json();
   }
 
-  root.MEL_LLM = { GEMINI_MODEL, geminiStream, geminiCheck };
+  root.MEL_LLM = { GEMINI_MODEL, geminiRequest, geminiStream, hostedStream, geminiCheck };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.MEL_LLM;
 })(typeof window !== 'undefined' ? window : globalThis);
