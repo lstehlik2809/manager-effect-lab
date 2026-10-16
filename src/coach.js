@@ -65,13 +65,29 @@
     return null;
   }
   const sentences = text => String(text).split(/(?<=[?!.])\s+|\n+/).map(s => s.trim()).filter(Boolean);
-  const LEAD = new RegExp('^(?:(?:ok|okay|so|and|also|great|thanks|thank you|cool|right|now|then|next|hi|hey|hello|guys|team|all|everyone|folks|quick question|one more|last|finally|btw|' + NAMES.join('|') + ')\\b[\\s,!:;.\\-–—]*)+', 'i');
+  const LEAD = new RegExp('^(?:(?:ok|okay|so|and|also|great|thanks|thank you|cool|right|now|then|next|first|hi|hey|hello|guys|team|all|everyone|folks|quick question|one more|last|finally|btw|over to you|go ahead and|' + NAMES.join('|') + ')\\b[\\s,!:;.\\-–—]*)+', 'i');
   const ASK = /^(what|which|who|whom|whose|when|where|why|how|do|does|did|is|are|was|were|can|could|would|will|should|have|has|had|any|anything|anyone|anybody|tell|share|send|give|list|check|confirm|explain|describe|let me know|please|pls|might)\b/i;
-  /** A question or a request for information: ends in "?" or opens like one ("what…", "tell me…", "share…"). */
+  // requests for reports worded as instructions: "post your reports", "I need what you have", "keep going"
+  const WANTED = "(?:reports?|clues?|info|information|notes|findings|evidence|details|facts|everything|anything|#\\s?\\d+|what (?:you|you all|each of you|everyone) (?:have|has|know|knows|got|found|hold|holds|see)|what you'?ve got)";
+  const REQUEST = new RegExp('^(?:' + [
+    '(?:post|paste|dump|drop|put|type|write|show|read|bring|pass|forward|lay out|spill|start|begin|walk (?:me|us) through|run (?:me|us) through|go through|fill (?:me|us) in)\\b.*\\b' + WANTED,
+    "(?:i|we)(?:'d| would)?\\s+(?:need|want|like|love)\\s+(?:to\\s+(?:see|hear|know|get)\\b|.*\\b" + WANTED + ')',
+    "let'?s (?:hear|see|get|go through|collect|gather|pool|list|share)\\b",
+    'report in\\b',
+    '(?:more|the rest|next(?: ones?)?|another(?: one)?|keep (?:going|them coming)|go on|go ahead|continue|carry on)(?:\\s*,?\\s*(?:please|pls))?[\\s!.]*$'
+  ].join('|') + ')', 'i');
+  // "Reports, please", "all reports in the chat now"; not "the reports point to B"
+  const NOUN_REQ = /^(?:(?:all|each|every|any)\s+(?:of\s+)?)?(?:your\s+|the\s+)?(?:other\s+|private\s+|hidden\s+|remaining\s+)?(?:reports|clues|info|information|notes|findings)\b(?!\s+(?:is|are|was|were|seems?|seem|looks?|says?|said|shows?|showed|rules?|ruled|points?|suggests?|agrees?|agree|confirms?|match(?:es)?|do|does|don'?t|doesn'?t|all|both|clearly)\b)/i;
+  /**
+   * A question or a request for information: ends in "?", opens like a question or request ("what…", "tell me…",
+   * "share…"), or asks for reports in other words ("post your reports", "reports, please", "keep going").
+   */
   function isQuestion(s) {
     if (s.includes('?')) return true;
     const t = s.replace(LEAD, '').trim();
-    return ASK.test(t) && !/^(please\s+)?(submit|wait|stop|hold on|be quiet)\b/i.test(t);
+    if (/^(please\s+)?(submit|wait|stop|hold on|be quiet|don'?t|do not|no need|never ?mind)\b/i.test(t)) return false;
+    return ASK.test(t) || REQUEST.test(t) || REQUEST.test(s.trim()) ||
+      (NOUN_REQ.test(t) && (/\b(please|pls|in the chat)\b|\b(now|here)[\s!.]*$/i.test(t) || words(t).length <= 2));
   }
   /* ---------- who a message to everyone is for ---------- */
   // A teammate is addressed by name ("Theo, …", "…, Theo?", "Hi Theo", "@Theo", "Theo what do you have?"),
@@ -152,7 +168,7 @@
 
   /* ---------- one puzzle ---------- */
   const OFFER = /\b(i have|i've got|i got|there's|there is|i also have)\s+(more|another|one more|something else|other|a couple more)|\bmore (on|about) (this|that|it)\b|\bif you (want|need) (it|them|more)\b|\bmore where that came from\b|\bask (me )?if you need\b/i;
-  const MORE_REQ = /\b(more|else|rest|other|another|yes|go ahead|sure|send (it|them))\b/i;
+  const MORE_REQ = /\b(more|else|rest|other|another|yes|go ahead|sure|send (it|them)|keep going|go on|continue|carry on|next)\b/i;
   const REPEAT_ADVICE = 'Asking again makes teammates recite their reports a couple at a time, relevant or not; asking about the options still standing gets the decisive ones sooner.';
   // Every decisive report out within this many requests counts as efficient (one per teammate).
   const EFFICIENT_ASKS = FOL.length;
@@ -194,7 +210,7 @@
         const connect = picked.some(src => aud.some(a => !src.has(a)));
         aud.forEach(fid => {
           if (!offers.has(fid)) return;
-          if (direct || /\b(more|else|rest|other|another)\b/i.test(m.text)) { offers.delete(fid); if (direct && MORE_REQ.test(m.text)) followUp = true; }
+          if (direct || /\b(more|else|rest|other|another|keep going|go on|continue|carry on)\b/i.test(m.text)) { offers.delete(fid); if (direct && MORE_REQ.test(m.text)) followUp = true; }
         });
         // specific: the message names an option, a report number or a detail from the reports
         // ("You mentioned the label applicator. Anything else on it?" counts)
@@ -223,7 +239,8 @@
           if (critNums.has(n) && clueBy.get(n).holder === m.from && !surfaced.has(n)) {
             surfaced.set(n, m.from);
             if (lastTo[m.from]) lastTo[m.from].credited.push(n);
-            if (surfaced.size === critical.length) asksToAll = leaderMsgs.filter(x => x.qs.length).length;
+            // requests: questions, and any other message that drew out a decisive report
+            if (surfaced.size === critical.length) asksToAll = leaderMsgs.filter(x => x.qs.length || x.credited.length).length;
           }
         });
         heard.push({ fid: m.from, toks: new Set(tokens(m.text)), nums: new Set(nums) });
@@ -292,7 +309,7 @@
       if (conn) good('connect', 3 + metrics.connects, `You passed on what one teammate said to the others${metrics.connects > 1 ? ` ${metrics.connects} times` : ''}, for example “${quote(conn.m.text, 80)}”. Connecting reports is how hidden-profile puzzles get solved.`);
       if (metrics.askedDirect.length === FOL.length) good('all-asked', 2, 'You asked all three teammates directly.');
 
-      if (!qList.length) tip('no-questions', 8, 'You didn\'t ask your teammates anything. Most of the decisive reports sat with them.');
+      if (!qList.length && missed.length) tip('no-questions', 8, 'You didn\'t ask your teammates anything. Most of the decisive reports sat with them.');
       // the costliest group of decisive reports that never came up
       // points at stake = what the report would add beyond the better of the best possible and the actual answer;
       // a missing report that was guessed right anyway costs nothing, but the guess is worth naming

@@ -1733,13 +1733,29 @@ HOW TO TAKE PART
     return null;
   }
   const sentences = text => String(text).split(/(?<=[?!.])\s+|\n+/).map(s => s.trim()).filter(Boolean);
-  const LEAD = new RegExp('^(?:(?:ok|okay|so|and|also|great|thanks|thank you|cool|right|now|then|next|hi|hey|hello|guys|team|all|everyone|folks|quick question|one more|last|finally|btw|' + NAMES.join('|') + ')\\b[\\s,!:;.\\-–—]*)+', 'i');
+  const LEAD = new RegExp('^(?:(?:ok|okay|so|and|also|great|thanks|thank you|cool|right|now|then|next|first|hi|hey|hello|guys|team|all|everyone|folks|quick question|one more|last|finally|btw|over to you|go ahead and|' + NAMES.join('|') + ')\\b[\\s,!:;.\\-–—]*)+', 'i');
   const ASK = /^(what|which|who|whom|whose|when|where|why|how|do|does|did|is|are|was|were|can|could|would|will|should|have|has|had|any|anything|anyone|anybody|tell|share|send|give|list|check|confirm|explain|describe|let me know|please|pls|might)\b/i;
-  /** A question or a request for information: ends in "?" or opens like one ("what…", "tell me…", "share…"). */
+  // requests for reports worded as instructions: "post your reports", "I need what you have", "keep going"
+  const WANTED = "(?:reports?|clues?|info|information|notes|findings|evidence|details|facts|everything|anything|#\\s?\\d+|what (?:you|you all|each of you|everyone) (?:have|has|know|knows|got|found|hold|holds|see)|what you'?ve got)";
+  const REQUEST = new RegExp('^(?:' + [
+    '(?:post|paste|dump|drop|put|type|write|show|read|bring|pass|forward|lay out|spill|start|begin|walk (?:me|us) through|run (?:me|us) through|go through|fill (?:me|us) in)\\b.*\\b' + WANTED,
+    "(?:i|we)(?:'d| would)?\\s+(?:need|want|like|love)\\s+(?:to\\s+(?:see|hear|know|get)\\b|.*\\b" + WANTED + ')',
+    "let'?s (?:hear|see|get|go through|collect|gather|pool|list|share)\\b",
+    'report in\\b',
+    '(?:more|the rest|next(?: ones?)?|another(?: one)?|keep (?:going|them coming)|go on|go ahead|continue|carry on)(?:\\s*,?\\s*(?:please|pls))?[\\s!.]*$'
+  ].join('|') + ')', 'i');
+  // "Reports, please", "all reports in the chat now"; not "the reports point to B"
+  const NOUN_REQ = /^(?:(?:all|each|every|any)\s+(?:of\s+)?)?(?:your\s+|the\s+)?(?:other\s+|private\s+|hidden\s+|remaining\s+)?(?:reports|clues|info|information|notes|findings)\b(?!\s+(?:is|are|was|were|seems?|seem|looks?|says?|said|shows?|showed|rules?|ruled|points?|suggests?|agrees?|agree|confirms?|match(?:es)?|do|does|don'?t|doesn'?t|all|both|clearly)\b)/i;
+  /**
+   * A question or a request for information: ends in "?", opens like a question or request ("what…", "tell me…",
+   * "share…"), or asks for reports in other words ("post your reports", "reports, please", "keep going").
+   */
   function isQuestion(s) {
     if (s.includes('?')) return true;
     const t = s.replace(LEAD, '').trim();
-    return ASK.test(t) && !/^(please\s+)?(submit|wait|stop|hold on|be quiet)\b/i.test(t);
+    if (/^(please\s+)?(submit|wait|stop|hold on|be quiet|don'?t|do not|no need|never ?mind)\b/i.test(t)) return false;
+    return ASK.test(t) || REQUEST.test(t) || REQUEST.test(s.trim()) ||
+      (NOUN_REQ.test(t) && (/\b(please|pls|in the chat)\b|\b(now|here)[\s!.]*$/i.test(t) || words(t).length <= 2));
   }
   /* ---------- who a message to everyone is for ---------- */
   // A teammate is addressed by name ("Theo, …", "…, Theo?", "Hi Theo", "@Theo", "Theo what do you have?"),
@@ -1820,7 +1836,7 @@ HOW TO TAKE PART
 
   /* ---------- one puzzle ---------- */
   const OFFER = /\b(i have|i've got|i got|there's|there is|i also have)\s+(more|another|one more|something else|other|a couple more)|\bmore (on|about) (this|that|it)\b|\bif you (want|need) (it|them|more)\b|\bmore where that came from\b|\bask (me )?if you need\b/i;
-  const MORE_REQ = /\b(more|else|rest|other|another|yes|go ahead|sure|send (it|them))\b/i;
+  const MORE_REQ = /\b(more|else|rest|other|another|yes|go ahead|sure|send (it|them)|keep going|go on|continue|carry on|next)\b/i;
   const REPEAT_ADVICE = 'Asking again makes teammates recite their reports a couple at a time, relevant or not; asking about the options still standing gets the decisive ones sooner.';
   // Every decisive report out within this many requests counts as efficient (one per teammate).
   const EFFICIENT_ASKS = FOL.length;
@@ -1862,7 +1878,7 @@ HOW TO TAKE PART
         const connect = picked.some(src => aud.some(a => !src.has(a)));
         aud.forEach(fid => {
           if (!offers.has(fid)) return;
-          if (direct || /\b(more|else|rest|other|another)\b/i.test(m.text)) { offers.delete(fid); if (direct && MORE_REQ.test(m.text)) followUp = true; }
+          if (direct || /\b(more|else|rest|other|another|keep going|go on|continue|carry on)\b/i.test(m.text)) { offers.delete(fid); if (direct && MORE_REQ.test(m.text)) followUp = true; }
         });
         // specific: the message names an option, a report number or a detail from the reports
         // ("You mentioned the label applicator. Anything else on it?" counts)
@@ -1891,7 +1907,8 @@ HOW TO TAKE PART
           if (critNums.has(n) && clueBy.get(n).holder === m.from && !surfaced.has(n)) {
             surfaced.set(n, m.from);
             if (lastTo[m.from]) lastTo[m.from].credited.push(n);
-            if (surfaced.size === critical.length) asksToAll = leaderMsgs.filter(x => x.qs.length).length;
+            // requests: questions, and any other message that drew out a decisive report
+            if (surfaced.size === critical.length) asksToAll = leaderMsgs.filter(x => x.qs.length || x.credited.length).length;
           }
         });
         heard.push({ fid: m.from, toks: new Set(tokens(m.text)), nums: new Set(nums) });
@@ -1960,7 +1977,7 @@ HOW TO TAKE PART
       if (conn) good('connect', 3 + metrics.connects, `You passed on what one teammate said to the others${metrics.connects > 1 ? ` ${metrics.connects} times` : ''}, for example “${quote(conn.m.text, 80)}”. Connecting reports is how hidden-profile puzzles get solved.`);
       if (metrics.askedDirect.length === FOL.length) good('all-asked', 2, 'You asked all three teammates directly.');
 
-      if (!qList.length) tip('no-questions', 8, 'You didn\'t ask your teammates anything. Most of the decisive reports sat with them.');
+      if (!qList.length && missed.length) tip('no-questions', 8, 'You didn\'t ask your teammates anything. Most of the decisive reports sat with them.');
       // the costliest group of decisive reports that never came up
       // points at stake = what the report would add beyond the better of the best possible and the actual answer;
       // a missing report that was guessed right anyway costs nothing, but the guess is worth naming
@@ -2163,7 +2180,7 @@ HOW TO TAKE PART
     }
   };
   const OPINION = /\b(what do you think|what'?s your (view|take|guess|opinion)|your (view|opinion|take|guess)|do you agree|which (one|option)s? (is|are|would|do|should)|should we|any (ideas|thoughts|hunches)|thoughts\b|best guess)/i;
-  const MORE = /\b(anything else|any ?more|more|the rest|other reports?|another|what else|go ahead|yes,? please|send (it|them))\b/i;
+  const MORE = /\b(anything else|any ?more|more|the rest|other reports?|another|what else|go ahead|yes,? please|send (it|them)|keep (going|them coming)|go on|carry on|continue|next (ones?|reports?|batch|few))\b/i;
   const ALL = /\b(all|every|everything|anything|what (do|did) you (have|know|got|see)|what have you got|your (reports?|clues?|info|information|notes)|share|send|list|tell (me|us))\b/i;
   const GREET = /^\s*(hi|hello|hey|hiya|good (morning|afternoon|evening))\b/i;
   const THANKS = /^\s*(thanks|thank you|thx|great|perfect|ok|okay|got it|cool|nice|good|noted|understood|brilliant|super)\b/i;
@@ -2548,6 +2565,8 @@ HOW TO TAKE PART
     if (name === 'design') renderReliability();
   }
   window.addEventListener('hashchange', () => { showTab(location.hash.slice(1)); window.scrollTo(0, 0); });
+  // a reload opens at the top, where an unfinished test can be resumed, not halfway down the start screen
+  try { if ('scrollRestoration' in history) history.scrollRestoration = 'manual'; } catch (e) { /* not allowed here */ }
 
   /* ================= method illustration ================= */
   function renderIllustration() {
@@ -3143,22 +3162,26 @@ HOW TO TAKE PART
           apiBox,
           HOSTED_URL ? '' : h('p', { class: 'small muted' }, 'Have a Claude account? The ', h('a', { href: CLAUDE_URL, target: '_blank', rel: 'noopener' }, 'claude.ai version'), ' runs the teammates on your own account, so it needs no key, only a sign-in.')]));
     const free = st.engine === 'scripted' || st.engine === 'hosted';
-    const startBtn = () => h('button', { class: 'btn primary start-btn', type: 'button', onclick: startTest }, `Start · ${len.time}`);
+    // with an unfinished test, resuming comes first and a new start says it replaces it
+    const pending = loadProgress(), resumeWait = !!(pending && pending.cur && pending.cur.engine === 'claude' && AI.sampleState === 'checking');
+    const startBtn = () => h('button', { class: 'btn' + (pending ? '' : ' primary') + ' start-btn', type: 'button', onclick: startTest }, `${pending ? 'Start a new test' : 'Start'} · ${len.time}`);
     const setup = h('div', { class: 'panel flow', id: 'ai-setup' }, h('h3', {}, 'Start'),
       h('div', { class: 'field' }, h('label', {}, 'Length'), h('div', { class: 'length-cards' }, Object.keys(LENGTHS).map(lengthCard)),
         len.warmups ? '' : h('span', { class: 'hint' }, 'To compare a group of people fairly, choose Standard: its warm-up measures how each person reasons alone.')),
       h('div', { class: 'field' }, h('label', {}, 'Teammates'), engines),
       AI.notice ? h('p', { class: 'note warn', id: 'ai-notice' }, AI.notice) : '',
-      h('div', { class: 'btn-row' }, startBtn(),
-        last ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''),
-      h('p', { class: 'small muted' }, free ? 'No sign-up and no key. ' : '', 'You can stop after any team puzzle and still get your result. If you leave mid-test, your progress is saved in this browser and you can resume.'),
+      h('div', { class: 'btn-row' },
+        pending ? h('button', { class: 'btn primary', type: 'button', disabled: resumeWait || null, onclick: resumeTest }, resumeWait ? 'Checking Claude…' : 'Resume your test') : '',
+        startBtn(),
+        last && !pending ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''),
+      h('p', { class: 'small muted' }, free ? 'No sign-up and no key. ' : '', pending ? 'You have an unfinished test saved in this browser. Starting a new test replaces it.' : 'You can stop after any team puzzle and still get your result. If you leave mid-test, your progress is saved in this browser and you can resume.'),
       more);
     put(root,
       h('div', { class: 'section-head' }, h('div', { class: 'eyebrow' }, 'Leadership test · inspired by Study 2'), h('h2', {}, 'How well do you lead a team?'),
         resumeBox(),
         h('p', {}, 'In a 2025 study, how well people led a team of AI agents strongly predicted how much they improved real human teams. Try a version of that test. You lead three AI teammates, Mira, Theo and Jonas, through hidden-profile puzzles. Each of you holds different clues and nobody can solve a puzzle alone, so your job is to draw out the right information, keep the team on track, and decide.'),
-        // on a phone the set-up panel is far down; offer the start right here
-        h('div', { class: 'btn-row hero-start' }, startBtn(), h('a', { href: '#ai-setup', class: 'small', onclick: e => { e.preventDefault(); $('#ai-setup').scrollIntoView({ behavior: 'smooth' }); } }, 'Choose length and teammates'),
+        // on a phone the set-up panel is far down; offer the start right here (the resume box above does it for an unfinished test)
+        pending ? '' : h('div', { class: 'btn-row hero-start' }, startBtn(), h('a', { href: '#ai-setup', class: 'small', onclick: e => { e.preventDefault(); $('#ai-setup').scrollIntoView({ behavior: 'smooth' }); } }, 'Choose length and teammates'),
           h('span', { class: 'small muted' }, `${len.label}, ${st.engine === 'hosted' ? 'live AI' : st.engine === 'scripted' ? 'scripted' : 'AI'} teammates` + (free ? ', no sign-up' : ''))),
         h('p', { class: 'note' }, h('strong', {}, 'For fun, not a verdict. '), 'This version is inspired by the study, not a copy of it: new puzzles, other AI models, fewer puzzles and its own scoring. It has not been validated, so your result describes how you led today\'s game, not how good a manager you are.')),
       h('div', { class: 'grid-2' },
@@ -3795,7 +3818,8 @@ HOW TO TAKE PART
         h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Follow-ups'), h('span', { class: 'value' }, m.followUps), h('span', { class: 'sub' }, `built on a teammate's answer` + (m.connects ? ` · ${m.connects} passed on to others` : ''))),
         h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Asked directly'), h('span', { class: 'value' }, `${m.askedDirect.length} of 3`), h('span', { class: 'sub' }, m.askedDirect.length ? m.askedDirect.map(folName).join(', ') : 'only messages to everyone')),
         h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Time used'), h('span', { class: 'value' }, time), h('span', { class: 'sub' }, `${m.turns} turns · ${m.words} words`))),
-      h('p', { class: 'small muted' }, 'In Study 2, leaders who asked more questions and had more back-and-forth did better with both AI and human teams; the sheer number of words did not matter. Here a question counts as specific when it names an option, a report number or a detail from the reports.'))
+      h('p', { class: 'small muted' }, 'In Study 2, leaders who asked more questions and had more back-and-forth did better with both AI and human teams; the sheer number of words did not matter. Here a question counts as specific when it names an option, a report number or a detail from the reports.' +
+        (m.critical && m.surfaced === m.critical ? ' You drew out every decisive report, so more questions would not have added anything here.' : '')))
       : h('div', { class: 'panel flow' }, h('h3', {}, 'How you reasoned'), pointsSplit(A.info, true), obsLists(obs.good, obs.tips),
         h('p', { class: 'small muted' }, 'In the warm-up you see every report, so any points lost come from reasoning, not from missing information.'));
     put(root,

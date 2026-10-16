@@ -36,6 +36,30 @@ check('questions are found with or without a question mark', () => {
   assert(!C.isQuestion('Let\'s decide now.'));
   assert(!C.isQuestion('Thanks Theo.'));
   assert(!C.isQuestion('Please submit when ready'));
+  // requests for reports worded as instructions
+  ['Everyone, post your reports.', 'Dump everything you have here.', 'I need all your reports.', 'Your reports, please.', 'Reports please!',
+    'Show me what you have.', 'Team, all reports in the chat now.', "Let's hear your reports.", 'Walk me through your reports.',
+    'Report in, team.', 'More please.', 'Keep going.', 'Next ones please', 'And the rest.']
+    .forEach(s => assert(C.isQuestion(s), s));
+  ['The reports point to B.', 'The info is clear now.', 'All reports agree on the valve.', 'More importantly, B is out.', 'I need to think about this.',
+    "Don't post anything yet.", 'I read the reports and I think B.', 'Keep it short.', 'Report #12 rules out C.']
+    .forEach(s => assert(!C.isQuestion(s), s));
+});
+
+check('requests worded as instructions count, so drawing everything out that way is efficient, not "no questions"', () => {
+  [['Everyone, post your reports.', 'Keep going.'], ['Dump everything you have here.', 'More please.'], ['Reports please!', 'Next ones please']].forEach(lines => {
+    const a = C.analyse(t1, play(t1, lines.map(text => ['all', text])), even);
+    assert.strictEqual(a.metrics.surfaced, a.metrics.critical, lines[0] + ': surfaced ' + a.metrics.surfaced);
+    assert.strictEqual(a.metrics.questions, 2, lines[0]);
+    assert.strictEqual(a.metrics.asksToAll, 2, lines[0]);
+    const keys = a.observations.map(o => o.key);
+    assert(!keys.includes('no-questions') && keys.includes('all-surfaced'), keys.join(','));
+  });
+  // a message that is not a request but still drew out decisive reports counts toward the requests it took
+  const msgs = [{ from: 'leader', to: 'all', text: 'Hi team.' }].concat(PZ.criticalFollowerClues(t1).map(c => ({ from: c.holder, to: 'leader', text: `#${c.num}: ${c.text}` })));
+  const a = C.analyse(t1, msgs, even);
+  assert.strictEqual(a.metrics.asksToAll, 1);
+  assert(!a.observations.some(o => o.key === 'no-questions'), a.observations.map(o => o.key).join(','));
 });
 
 check('repeated general requests earn no extra credit and are named in the feedback while reports stay hidden', () => {

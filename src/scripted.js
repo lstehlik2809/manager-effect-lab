@@ -34,7 +34,7 @@
     }
   };
   const OPINION = /\b(what do you think|what'?s your (view|take|guess|opinion)|your (view|opinion|take|guess)|do you agree|which (one|option)s? (is|are|would|do|should)|should we|any (ideas|thoughts|hunches)|thoughts\b|best guess)/i;
-  const MORE = /\b(anything else|any ?more|more|the rest|other reports?|another|what else|go ahead|yes,? please|send (it|them))\b/i;
+  const MORE = /\b(anything else|any ?more|more|the rest|other reports?|another|what else|go ahead|yes,? please|send (it|them)|keep (going|them coming)|go on|carry on|continue|next (ones?|reports?|batch|few))\b/i;
   const ALL = /\b(all|every|everything|anything|what (do|did) you (have|know|got|see)|what have you got|your (reports?|clues?|info|information|notes)|share|send|list|tell (me|us))\b/i;
   const GREET = /^\s*(hi|hello|hey|hiya|good (morning|afternoon|evening))\b/i;
   const THANKS = /^\s*(thanks|thank you|thx|great|perfect|ok|okay|got it|cool|nice|good|noted|understood|brilliant|super)\b/i;

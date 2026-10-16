@@ -182,6 +182,8 @@
     if (name === 'design') renderReliability();
   }
   window.addEventListener('hashchange', () => { showTab(location.hash.slice(1)); window.scrollTo(0, 0); });
+  // a reload opens at the top, where an unfinished test can be resumed, not halfway down the start screen
+  try { if ('scrollRestoration' in history) history.scrollRestoration = 'manual'; } catch (e) { /* not allowed here */ }
 
   /* ================= method illustration ================= */
   function renderIllustration() {
@@ -777,22 +779,26 @@
           apiBox,
           HOSTED_URL ? '' : h('p', { class: 'small muted' }, 'Have a Claude account? The ', h('a', { href: CLAUDE_URL, target: '_blank', rel: 'noopener' }, 'claude.ai version'), ' runs the teammates on your own account, so it needs no key, only a sign-in.')]));
     const free = st.engine === 'scripted' || st.engine === 'hosted';
-    const startBtn = () => h('button', { class: 'btn primary start-btn', type: 'button', onclick: startTest }, `Start · ${len.time}`);
+    // with an unfinished test, resuming comes first and a new start says it replaces it
+    const pending = loadProgress(), resumeWait = !!(pending && pending.cur && pending.cur.engine === 'claude' && AI.sampleState === 'checking');
+    const startBtn = () => h('button', { class: 'btn' + (pending ? '' : ' primary') + ' start-btn', type: 'button', onclick: startTest }, `${pending ? 'Start a new test' : 'Start'} · ${len.time}`);
     const setup = h('div', { class: 'panel flow', id: 'ai-setup' }, h('h3', {}, 'Start'),
       h('div', { class: 'field' }, h('label', {}, 'Length'), h('div', { class: 'length-cards' }, Object.keys(LENGTHS).map(lengthCard)),
         len.warmups ? '' : h('span', { class: 'hint' }, 'To compare a group of people fairly, choose Standard: its warm-up measures how each person reasons alone.')),
       h('div', { class: 'field' }, h('label', {}, 'Teammates'), engines),
       AI.notice ? h('p', { class: 'note warn', id: 'ai-notice' }, AI.notice) : '',
-      h('div', { class: 'btn-row' }, startBtn(),
-        last ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''),
-      h('p', { class: 'small muted' }, free ? 'No sign-up and no key. ' : '', 'You can stop after any team puzzle and still get your result. If you leave mid-test, your progress is saved in this browser and you can resume.'),
+      h('div', { class: 'btn-row' },
+        pending ? h('button', { class: 'btn primary', type: 'button', disabled: resumeWait || null, onclick: resumeTest }, resumeWait ? 'Checking Claude…' : 'Resume your test') : '',
+        startBtn(),
+        last && !pending ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''),
+      h('p', { class: 'small muted' }, free ? 'No sign-up and no key. ' : '', pending ? 'You have an unfinished test saved in this browser. Starting a new test replaces it.' : 'You can stop after any team puzzle and still get your result. If you leave mid-test, your progress is saved in this browser and you can resume.'),
       more);
     put(root,
       h('div', { class: 'section-head' }, h('div', { class: 'eyebrow' }, 'Leadership test · inspired by Study 2'), h('h2', {}, 'How well do you lead a team?'),
         resumeBox(),
         h('p', {}, 'In a 2025 study, how well people led a team of AI agents strongly predicted how much they improved real human teams. Try a version of that test. You lead three AI teammates, Mira, Theo and Jonas, through hidden-profile puzzles. Each of you holds different clues and nobody can solve a puzzle alone, so your job is to draw out the right information, keep the team on track, and decide.'),
-        // on a phone the set-up panel is far down; offer the start right here
-        h('div', { class: 'btn-row hero-start' }, startBtn(), h('a', { href: '#ai-setup', class: 'small', onclick: e => { e.preventDefault(); $('#ai-setup').scrollIntoView({ behavior: 'smooth' }); } }, 'Choose length and teammates'),
+        // on a phone the set-up panel is far down; offer the start right here (the resume box above does it for an unfinished test)
+        pending ? '' : h('div', { class: 'btn-row hero-start' }, startBtn(), h('a', { href: '#ai-setup', class: 'small', onclick: e => { e.preventDefault(); $('#ai-setup').scrollIntoView({ behavior: 'smooth' }); } }, 'Choose length and teammates'),
           h('span', { class: 'small muted' }, `${len.label}, ${st.engine === 'hosted' ? 'live AI' : st.engine === 'scripted' ? 'scripted' : 'AI'} teammates` + (free ? ', no sign-up' : ''))),
         h('p', { class: 'note' }, h('strong', {}, 'For fun, not a verdict. '), 'This version is inspired by the study, not a copy of it: new puzzles, other AI models, fewer puzzles and its own scoring. It has not been validated, so your result describes how you led today\'s game, not how good a manager you are.')),
       h('div', { class: 'grid-2' },
@@ -1429,7 +1435,8 @@
         h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Follow-ups'), h('span', { class: 'value' }, m.followUps), h('span', { class: 'sub' }, `built on a teammate's answer` + (m.connects ? ` · ${m.connects} passed on to others` : ''))),
         h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Asked directly'), h('span', { class: 'value' }, `${m.askedDirect.length} of 3`), h('span', { class: 'sub' }, m.askedDirect.length ? m.askedDirect.map(folName).join(', ') : 'only messages to everyone')),
         h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Time used'), h('span', { class: 'value' }, time), h('span', { class: 'sub' }, `${m.turns} turns · ${m.words} words`))),
-      h('p', { class: 'small muted' }, 'In Study 2, leaders who asked more questions and had more back-and-forth did better with both AI and human teams; the sheer number of words did not matter. Here a question counts as specific when it names an option, a report number or a detail from the reports.'))
+      h('p', { class: 'small muted' }, 'In Study 2, leaders who asked more questions and had more back-and-forth did better with both AI and human teams; the sheer number of words did not matter. Here a question counts as specific when it names an option, a report number or a detail from the reports.' +
+        (m.critical && m.surfaced === m.critical ? ' You drew out every decisive report, so more questions would not have added anything here.' : '')))
       : h('div', { class: 'panel flow' }, h('h3', {}, 'How you reasoned'), pointsSplit(A.info, true), obsLists(obs.good, obs.tips),
         h('p', { class: 'small muted' }, 'In the warm-up you see every report, so any points lost come from reasoning, not from missing information.'));
     put(root,
