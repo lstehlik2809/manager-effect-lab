@@ -69,7 +69,7 @@ npx wrangler@4.145.0 secret put GEMINI_API_KEY
 npx wrangler@4.145.0 deploy
 ```
 
-Then set `HOSTED_DEPLOYED` in `src/app.js` to the worker's URL ending in `/reply` and run `npm run build`; the "Live AI teammates" option appears and becomes the default. To try it before deploying, run `node --env-file=path/to/.env worker/dev-server.mjs` and open the app on localhost with `?hosted=http://127.0.0.1:8787/reply`.
+Then set `HOSTED_DEPLOYED` in `src/app.js` to the worker's URL ending in `/reply` and run `npm run build`; the "Live AI teammates" option appears and becomes the default. The live worker is `manager-effect-lab-teammates` at `https://manager-effect-lab-teammates.ludek-stehlik.workers.dev/reply`; logs and usage are in the Cloudflare dashboard under Workers. To try it before deploying, run `node --env-file=path/to/.env worker/dev-server.mjs` and open the app on localhost with `?hosted=http://127.0.0.1:8787/reply`.
 
 A single person's team score is raw: it mixes leadership with how well that person reasons alone. Study 2 measured leadership after controlling for hard skills (three individual puzzles, fluid IQ and typing speed) across its 249 leaders. **Compare a group** does the same for a group of people who took the same test version with the same teammates. Following models (1)–(3) of Study 2:
 

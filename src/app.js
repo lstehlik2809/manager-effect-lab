@@ -670,7 +670,7 @@
   // Hosted AI teammates (worker/worker.mjs): live teammates with no key for visitors. Empty until the
   // worker is deployed; set it to the worker's URL ending in /reply and the option appears.
   // On localhost, ?hosted=<url> points at a local stand-in (worker/dev-server.mjs) instead.
-  const HOSTED_DEPLOYED = '';
+  const HOSTED_DEPLOYED = 'https://manager-effect-lab-teammates.ludek-stehlik.workers.dev/reply';
   const HOSTED_URL = (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).get('hosted')) || HOSTED_DEPLOYED;
   const SCR = window.MEL_SCRIPTED, COACH = window.MEL_COACH;
   const FOL = PZ.FOLLOWERS;
@@ -932,7 +932,7 @@
     const mins = p.solo ? (AI.settings.minutes ? 4 : 0) : AI.settings.minutes;
     AI.cur = {
       puzzle: p, startedAt: Date.now(), deadline: mins ? Date.now() + mins * 60000 : null, locked: false,
-      messages: [], to: 'all', draft: '', confirm: false, timer: null,
+      messages: [], seq: 0, to: 'all', draft: '', confirm: false, timer: null,
       answers: p.questions.map(() => [20, 20, 20, 20, 20]), out: p.questions.map(() => [false, false, false, false, false]),
       followers: Object.fromEntries(FOL.map(f => [f.id, { busy: false, queued: false, ctl: null, shared: new Set(), bubble: null }])),
       engine: AI.settings.engine
@@ -1030,7 +1030,7 @@
     if (!c || c.locked) return;
     const text = ta.value.trim(); if (!text) return;
     ta.value = ''; c.draft = '';
-    const m = { from: 'leader', to: c.to, text, t: elapsed() };
+    const m = { from: 'leader', to: c.to, text, t: elapsed(), seq: ++c.seq };
     c.messages.push(m);
     $('#msgs').append(msgEl(m)); scrollChat();
     (c.to === 'all' ? FOL.map(f => f.id) : [c.to]).forEach(requestReply);
@@ -1046,14 +1046,18 @@
     const row = h('div', { class: 'msg' }, h('span', { class: 'avatar ' + fid }, folName(fid)[0]), bubble);
     $('#msgs').append(row); scrollChat();
     const ctl = new AbortController(); st.ctl = ctl;
-    const puzzleAt = c;
+    // A reply answers the messages sent before it was requested, so it is filed there, even when the leader
+    // writes again while it is still coming in; otherwise the teammate's turn would look finished and the
+    // newer message would never get an answer.
+    const puzzleAt = c, at = c.seq + 0.5;
     engineReply(fid, ctl.signal, text => { if (text && !/^PASS/i.test(text)) { bubble.classList.remove('typing'); bubbleText.textContent = text; scrollChat(); } })
       .then(text => {
         if (AI.cur !== puzzleAt) return;
         text = cleanReply(text, fid);
         if (!text) { row.remove(); return; }
         bubble.classList.remove('typing'); bubbleText.textContent = text;
-        c.messages.push({ from: fid, to: 'leader', text, t: elapsed() });
+        c.messages.push({ from: fid, to: 'leader', text, t: elapsed(), seq: at });
+        c.messages.sort((a, b) => a.seq - b.seq);
         scrollChat();
       })
       .catch(async err => {

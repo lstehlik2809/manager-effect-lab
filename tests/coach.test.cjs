@@ -116,6 +116,9 @@ check('scripted teammates: addressing, topics, report numbers, more, views', () 
   assert(/nothing|don't see/i.test(SCR.reply(t1, 'f2', m('What about the capping head?'), sh())), 'Theo has nothing on the capping head');
   assert(SCR.reply(t1, 'f1', m('Mira, is report #' + AUTO + ' about manual mode?'), sh()).includes('#' + AUTO));
   assert(/^(Hi|Hey|Hello)/.test(SCR.reply(t1, 'f3', m('Hi team!'), sh())));
+  // a question asked by its wording gets reports on that question only
+  const q1 = SCR.reply(t1, 'f1', m('What do you have on which component failed?'), sh()), q1nums = (q1.match(/#(\d+)/g) || []).map(x => +x.slice(1));
+  assert(q1nums.length && q1nums.every(n => t1.clues.find(c => c.num === n).q === 0), q1);
   // "anything else?" carries on, and a teammate with nothing left says so
   const s = sh(), msgs = [{ from: 'leader', to: 'f3', text: 'Jonas, what do you have?' }];
   msgs.push({ from: 'f3', to: 'leader', text: SCR.reply(t1, 'f3', msgs, s) });

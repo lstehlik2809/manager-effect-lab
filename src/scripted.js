@@ -59,7 +59,13 @@
     const mine = PZ.cluesFor(p, fid).slice().sort((a, b) => (a.holder === 'public') - (b.holder === 'public'));
     const v = C.vocab(p);
     const topics = new Set(C.tokens(text).filter(t => v.specific.has(t)));
-    const opts = C.optionMentions(p, text), nums = C.reportNums(text), qMention = C.questionMention(text);
+    const opts = C.optionMentions(p, text), nums = C.reportNums(text);
+    // a question named by number ("question 1") or by its wording ("which component failed?")
+    let qMention = C.questionMention(text);
+    if (qMention == null) {
+      const words = new Set(C.tokens(text)), hits = p.questions.map(q => C.tokens(q.text).filter(t => words.has(t)).length);
+      if (hits.filter(n => n > 0).length === 1) qMention = hits.findIndex(n => n > 0);
+    }
     const asked = C.sentences(text).some(C.isQuestion);
     const share = (cls, again) => {
       cls.forEach(cl => shared.add(cl.num));
