@@ -17,10 +17,16 @@
           <p>How well do you lead a team? Lead three AI teammates through a series of puzzles and see which research-backed leadership habits you use. Inspired by research by Weidmann, Deming and colleagues on measuring managers' causal effect on their teams.</p>
         </div>
       </div>
-      <nav class="mast-links" aria-label="Sources">
-        <a href="https://www.nber.org/papers/w32699" target="_blank" rel="noopener">Study 1 (NBER w32699)</a>
-        <a href="https://www.nber.org/papers/w33662" target="_blank" rel="noopener">Study 2 (NBER w33662)</a>
-      </nav>
+      <div class="mast-side">
+        <nav class="mast-links" aria-label="Sources">
+          <a href="https://doi.org/10.1093/qje/qjag004" target="_blank" rel="noopener">Study 1 (QJE 2026)</a>
+          <a href="https://www.nber.org/papers/w33662" target="_blank" rel="noopener">Study 2 (NBER w33662)</a>
+        </nav>
+        <button class="theme-btn" id="theme-btn" type="button" aria-label="Switch to dark mode" title="Switch to dark mode">
+          <svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+          <svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+      </div>
     </div>
     <nav class="tabs" aria-label="Sections">
       <a class="tab" href="#ai-test" data-tab="ai-test">Take the test</a>
@@ -62,9 +68,9 @@
 
     <div class="grid-2">
       <div class="panel">
-        <div class="eyebrow">Study 1 · NBER w32699 · 2024</div>
+        <div class="eyebrow">Study 1 · Quarterly Journal of Economics · 2026</div>
         <h3>How Do You Find a Good Manager?</h3>
-        <p class="cite">Weidmann, Vecci, Said, Deming &amp; Bhalotra. 555 participants, 728 three-person teams, Collaborative Production Task, 4 random rotations, pre-registered.</p>
+        <p class="cite">Weidmann, Vecci, Said, Deming &amp; Bhalotra. 555 participants, 728 three-person teams, Collaborative Production Task, 4 random rotations, pre-registered. Figures below are from the 2024 <a href="https://www.nber.org/papers/w32699" target="_blank" rel="noopener">NBER working paper</a>; the peer-reviewed version, <a href="https://doi.org/10.1093/qje/qjag004" target="_blank" rel="noopener"><em>How Do You Identify a Good Manager?</em></a> (QJE 2026), adds co-authors and further evidence, so some numbers may differ.</p>
         <div class="facts">
           <div class="fact"><span class="big">0.23<span class="small"> SD</span></span><p><strong>Typical manager effect.</strong> A manager 1 SD above average raises team performance by 0.23 SD (randomization inference p = .04), about as much as raising both workers' production skill by 1 SD (0.26 SD). A good manager is worth almost twice a good worker.</p></div>
           <div class="fact"><span class="big">−0.10</span><p><strong>Self-nominated managers did worse</strong> than managers picked by lottery (−0.10 to −0.13 SD, marginally significant). Self-promoters were more overconfident, especially about their social skills.</p></div>
@@ -73,7 +79,7 @@
         </div>
       </div>
       <div class="panel">
-        <div class="eyebrow">Study 2 · NBER w33662 · 2025</div>
+        <div class="eyebrow">Study 2 · NBER w33662 · 2025 · working paper</div>
         <h3>Measuring Human Leadership Skills with AI Agents</h3>
         <p class="cite">Weidmann, Xu &amp; Deming. 249 leaders, hidden-profile puzzles, 6 human teams and 6 AI teams (GPT-4o followers) per leader, order counterbalanced, pre-registered.</p>
         <div class="facts">
@@ -88,7 +94,7 @@
     <div class="panel prose">
       <h3>Read the results with care</h3>
       <ul>
-        <li>Both papers are working papers, circulated for discussion and not yet peer reviewed. The tasks are lab tasks done mostly by students; field validation is still to come.</li>
+        <li>Study 1 has been peer reviewed and published in the <em>Quarterly Journal of Economics</em> (2026). Study 2, the AI-agent study behind the leadership test, is still a working paper (under revise and resubmit at <em>Management Science</em>), so its results have not yet passed peer review. Both rest on lab tasks done mostly by students.</li>
         <li>The causal reading depends on random assignment. In everyday HR data, managers and teams are not matched at random, so the same calculation would be confounded.</li>
         <li>With four or six rotations, the estimate for any single manager is noisy. Study 1 therefore focused on the typical size of manager effects (σ<sub>α</sub>) and on what predicts them. Use the reliability calculator before ranking individuals.</li>
         <li>The leadership test on this site follows Study 2's structure but uses new puzzles, other AI models, two or four team puzzles instead of six and its own scoring. It has not been validated against human teams and has no norms, so use it for practice or as a research tool with a group, not to judge an individual.</li>
@@ -209,7 +215,7 @@
 
 <footer>
   <div class="wrap">
-    <p>Built on Weidmann, Vecci, Said, Deming &amp; Bhalotra (2024), <em>How Do You Find a Good Manager?</em> NBER WP 32699, and Weidmann, Xu &amp; Deming (2025), <em>Measuring Human Leadership Skills with AI Agents</em>, NBER WP 33662. This is an independent implementation; numbers it produces are estimates from your data, not results from the papers. The analysis runs entirely in your browser; uploaded files never leave this page. The AI leadership test sends your chat messages only to the AI service behind the teammates you pick, and only after you start it; scripted teammates send nothing.</p>
+    <p>Built on Weidmann, Vecci, Said, Bhalotra, Adhvaryu, Nyshadham, Tamayo &amp; Deming (2026), <em>How Do You Identify a Good Manager?</em> Quarterly Journal of Economics (working paper version: <em>How Do You Find a Good Manager?</em> NBER WP 32699, 2024), and Weidmann, Xu &amp; Deming (2025), <em>Measuring Human Leadership Skills with AI Agents</em>, NBER WP 33662. This is an independent implementation; numbers it produces are estimates from your data, not results from the papers. The analysis runs entirely in your browser; uploaded files never leave this page. The AI leadership test sends your chat messages only to the AI service behind the teammates you pick, and only after you start it; scripted teammates send nothing.</p>
   </div>
 </footer>
 <div class="tip" id="tip" hidden></div>

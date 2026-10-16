@@ -194,5 +194,13 @@ check('credence score', () => {
   assert(Math.abs(S.credenceScore([50, 0, 0, 0, 50], c) - 100) < 1e-9);
 });
 
+check('scaling answers to 100 keeps proportions', () => {
+  assert.deepStrictEqual(S.scaleTo100([50, 25, 25, 25, 0]), [40, 20, 20, 20, 0]);
+  assert.deepStrictEqual(S.scaleTo100([10, 10, 10, 0, 0]), [34, 33, 33, 0, 0]);
+  assert.deepStrictEqual(S.scaleTo100([1, 1, 1, 1, 1, 1, 1]).reduce((a, b) => a + b, 0), 100);
+  assert.deepStrictEqual(S.scaleTo100([30, 70, 0, 0, 0]), [30, 70, 0, 0, 0]);
+  assert.strictEqual(S.scaleTo100([0, 0, 0, 0, 0]), null);
+});
+
 console.log(failures ? failures + ' check(s) failed' : 'all checks passed');
 process.exit(failures ? 1 : 0);

@@ -1,6 +1,7 @@
 /* Manager Effect Lab — estimation engine.
  * Implements the repeated-random-assignment method of
- *   Weidmann, Vecci, Said, Deming & Bhalotra (2024), NBER w32699, and
+ *   Weidmann, Vecci, Said, Deming & Bhalotra (2024), NBER w32699 (published in QJE 2026
+ *   as "How Do You Identify a Good Manager?"), and
  *   Weidmann, Xu & Deming (2025), NBER w33662.
  * Pure functions only; runs in the browser and in Node (for tests). */
 (function (root) {
@@ -692,6 +693,16 @@
     let tv = 0;
     for (let i = 0; i < correct.length; i++) tv += Math.abs((given[i] || 0) - correct[i]);
     return 100 * (1 - tv / 200);
+  };
+  /** Rescales credences proportionally so whole numbers add to 100 (largest remainder); null if all are 0. */
+  S.scaleTo100 = function (vals) {
+    const v = vals.map(x => Math.max(0, +x || 0)), sum = v.reduce((a, b) => a + b, 0);
+    if (!(sum > 0)) return null;
+    const raw = v.map(x => 100 * x / sum), out = raw.map(Math.floor);
+    const order = raw.map((x, i) => i).sort((i, j) => (raw[j] - out[j]) - (raw[i] - out[i]) || i - j);
+    const short = 100 - out.reduce((a, b) => a + b, 0);
+    for (let k = 0; k < short; k++) out[order[k]]++;
+    return out;
   };
 
   /** Two-sided critical value of the t distribution (e.g. level 0.95). */

@@ -185,6 +185,24 @@
   // a reload opens at the top, where an unfinished test can be resumed, not halfway down the start screen
   try { if ('scrollRestoration' in history) history.scrollRestoration = 'manual'; } catch (e) { /* not allowed here */ }
 
+  /* ================= light / dark ================= */
+  // follows the system until the reader picks a theme; the choice is remembered in this browser
+  const darkQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  const isDark = () => { const t = document.documentElement.dataset.theme; return t ? t === 'dark' : !!(darkQuery && darkQuery.matches); };
+  function syncThemeBtn() {
+    const b = $('#theme-btn'); if (!b) return;
+    const label = isDark() ? 'Switch to light mode' : 'Switch to dark mode';
+    b.classList.toggle('is-dark', isDark()); b.setAttribute('aria-label', label); b.title = label;
+  }
+  (function initTheme() {
+    const saved = store.get('theme', null);
+    if (saved === 'light' || saved === 'dark') document.documentElement.dataset.theme = saved;
+    syncThemeBtn();
+    const b = $('#theme-btn');
+    if (b) b.addEventListener('click', () => { const t = isDark() ? 'light' : 'dark'; document.documentElement.dataset.theme = t; store.set('theme', t); syncThemeBtn(); });
+    if (darkQuery && darkQuery.addEventListener) darkQuery.addEventListener('change', syncThemeBtn);
+  })();
+
   /* ================= method illustration ================= */
   function renderIllustration() {
     const pred = [-0.45, 0.3, -0.1, 0.55], act = [-0.05, 0.55, 0.35, 0.8];
@@ -1326,6 +1344,11 @@
     if (left.length) { const base = Math.floor(100 / left.length); left.forEach(i => { a[i] = base; }); for (let k = 0; k < 100 - base * left.length; k++) a[left[k]]++; }
     c.answers[qi] = a;
   }
+  // keeps the proportions the leader typed but makes them add up to 100
+  function scaleAnswers(qi) {
+    const a = S.scaleTo100(AI.cur.answers[qi]);
+    if (a) AI.cur.answers[qi] = a;
+  }
   function renderAnswers() {
     const c = AI.cur, p = c.puzzle, box = $('#answers');
     const L = 'ABCDE';
@@ -1339,11 +1362,14 @@
             oninput: e => { c.answers[qi][k] = Math.max(0, Math.min(100, +e.target.value || 0)); updateSums(); saveProgress(); } }),
           h('button', { class: 'x', type: 'button', 'aria-pressed': c.out[qi][k] ? 'true' : 'false', 'aria-label': `Rule out ${o}`, title: 'Rule out',
             onclick: () => { c.out[qi][k] = !c.out[qi][k]; evenSplit(qi); renderAnswers(); saveProgress(); } }, '✕'))),
-        h('div', { class: 'sum', id: `sum-${qi}` }, h('span', {}, `Total ${sum}%`), h('button', { class: 'btn quiet', type: 'button', onclick: () => { evenSplit(qi); renderAnswers(); saveProgress(); } }, 'Even split')));
+        h('div', { class: 'sum', id: `sum-${qi}` }, h('span', {}, `Total ${sum}%`),
+          h('span', { class: 'btn-row' },
+            h('button', { class: 'btn quiet', type: 'button', id: `scale-${qi}`, title: 'Rescale your numbers proportionally so they add up to 100', onclick: () => { scaleAnswers(qi); renderAnswers(); saveProgress(); } }, 'Scale to 100%'),
+            h('button', { class: 'btn quiet', type: 'button', onclick: () => { evenSplit(qi); renderAnswers(); saveProgress(); } }, 'Even split'))));
     });
     put(box,
       h('div', { class: 'panel-head' }, h('h3', {}, 'Your answer'), h('span', { class: 'small muted' }, 'Rule options out with ✕')),
-      AI.results.length ? '' : h('p', { class: 'note small' }, h('strong', {}, 'How to answer. '), 'Press ✕ on each option a report rules out; the 100 points then split evenly over the rest. You score highest when the options you keep are exactly the ones still possible.'),
+      AI.results.length ? '' : h('p', { class: 'note small' }, h('strong', {}, 'How to answer. '), 'Press ✕ on each option a report rules out; the 100 points then split evenly over the rest. You score highest when the options you keep are exactly the ones still possible. If you type your own numbers, Scale to 100% rescales them proportionally.'),
       qBlocks,
       h('p', { class: 'small muted', id: 'ans-msg' }),
       h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', type: 'button', id: 'submit-btn', onclick: submitAnswers }, c.confirm ? 'Confirm and finish' : 'Submit answers')));
@@ -1354,12 +1380,14 @@
     c.answers.forEach((a, qi) => {
       const sum = a.reduce((x, y) => x + (+y || 0), 0), el = $('#sum-' + qi);
       if (el) { el.firstChild.textContent = `Total ${sum}%`; el.classList.toggle('bad', Math.abs(sum - 100) > 0.5); }
+      const sb = $('#scale-' + qi);
+      if (sb) sb.disabled = !(sum > 0) || Math.abs(sum - 100) <= 0.5;
     });
   }
   function submitAnswers() {
     const c = AI.cur, msg = $('#ans-msg');
     const bad = c.answers.findIndex(a => Math.abs(a.reduce((x, y) => x + (+y || 0), 0) - 100) > 0.5);
-    if (bad >= 0) { msg.textContent = `Question ${bad + 1} adds up to ${c.answers[bad].reduce((x, y) => x + (+y || 0), 0)}%. Make it 100%, or use Even split.`; return; }
+    if (bad >= 0) { msg.textContent = `Question ${bad + 1} adds up to ${c.answers[bad].reduce((x, y) => x + (+y || 0), 0)}%. Make it 100%, or use Scale to 100% or Even split.`; return; }
     if (!c.confirm && !c.locked && !c.puzzle.solo) { c.confirm = true; $('#submit-btn').textContent = 'Confirm and finish'; msg.textContent = 'Submitting ends the chat for this puzzle.'; setTimeout(() => { if (AI.cur === c && c.confirm) { c.confirm = false; const b = $('#submit-btn'); if (b) b.textContent = 'Submit answers'; } }, 5000); return; }
     lockChat();
     clearTimeout(c.timer);

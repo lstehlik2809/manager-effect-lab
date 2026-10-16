@@ -13,6 +13,9 @@ const css = read('styles.css');
 const body = read('body.html');
 const scripts = ['stats.js', 'puzzles.js', 'coach.js', 'scripted.js', 'llm.js', 'app.js'].map(f => '<script>\n' + safe(read(f)) + '\n</script>').join('\n');
 
+// applies a saved light/dark choice before first paint, so a dark-mode reader never sees a light flash
+const themeBoot = '<script>try{var t=JSON.parse(localStorage.getItem("mel.theme"));if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>';
+
 const full = `<!doctype html>
 <html lang="en">
 <head>
@@ -22,6 +25,7 @@ const full = `<!doctype html>
 <meta name="description" content="${description.replace(/"/g, '&quot;')}">
 <meta property="og:title" content="${ogTitle}">
 <meta property="og:description" content="${description.replace(/"/g, '&quot;')}">
+${themeBoot}
 ${fonts}
 <style>
 ${css}
@@ -33,7 +37,7 @@ ${scripts}
 </body>
 </html>
 `;
-const fragment = `<title>${title}</title>\n${fonts}\n<style>\n${css}\n</style>\n${body}\n${scripts}\n`;
+const fragment = `<title>${title}</title>\n${themeBoot}\n${fonts}\n<style>\n${css}\n</style>\n${body}\n${scripts}\n`;
 fs.writeFileSync(path.join(__dirname, 'index.html'), full);
 fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });
 fs.writeFileSync(path.join(__dirname, 'dist', 'artifact.html'), fragment);

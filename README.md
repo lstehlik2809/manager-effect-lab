@@ -2,7 +2,7 @@
 
 **[Open the app](https://lstehlik2809.github.io/manager-effect-lab/)** · **[claude.ai version](https://claude.ai/artifact/696yvnhLNTxw2zjFXYXz42)** (teammates run on your own Claude account, no API key needed)
 
-How do you tell a good manager from a manager who was lucky with their team? Two pre-registered NBER working papers by Ben Weidmann, David Deming and colleagues borrow the answer from causal inference. Rotate managers at random through several teams, predict each team's result from the individually tested skills of its members, and treat the gap between what the team achieved and what was predicted as the manager's contribution. A good manager is one whose teams keep beating the prediction.
+How do you tell a good manager from a manager who was lucky with their team? Two pre-registered studies by Ben Weidmann, David Deming and colleagues borrow the answer from causal inference. Rotate managers at random through several teams, predict each team's result from the individually tested skills of its members, and treat the gap between what the team achieved and what was predicted as the manager's contribution. A good manager is one whose teams keep beating the prediction.
 
 The app opens on a playful leadership test inspired by the second paper, in which you lead a team of AI agents. It is meant for anyone curious how they lead, for example people who find it through LinkedIn. Behind it sit the research summary and a toolkit that implements the full method for HR and research teams who want to run it with real teams.
 
@@ -101,14 +101,14 @@ node --env-file=.env worker/dev-server.mjs       # local hosted teammates on :87
 
 ## Caveats
 
-- Both papers are working papers and have not been peer reviewed. The evidence comes from lab tasks done mostly by students.
+- Study 1 has been peer reviewed and published in the Quarterly Journal of Economics (2026). Study 2, the AI-agent study, is still a working paper (revise and resubmit at Management Science). The evidence comes from lab tasks done mostly by students.
 - The causal reading depends on random assignment. Ordinary HR data, where managers and teams are not matched at random, would give confounded estimates.
 - The AI leadership test here has not been validated against human teams or real-world leadership, and has no norms. Use it for practice or as a research tool, not to judge individuals.
 - Use the scores as one input among several and check for adverse impact before using them in any selection decision.
 
 ## Sources
 
-- Weidmann, B., Vecci, J., Said, F., Deming, D. J., & Bhalotra, S. R. (2024). [How Do You Find a Good Manager?](https://www.nber.org/papers/w32699) NBER Working Paper 32699.
+- Weidmann, B., Vecci, J., Said, F., Bhalotra, S., Adhvaryu, A., Nyshadham, A., Tamayo, J., & Deming, D. J. (2026). [How Do You Identify a Good Manager?](https://doi.org/10.1093/qje/qjag004) Quarterly Journal of Economics. Working paper version: Weidmann, Vecci, Said, Deming & Bhalotra (2024), [How Do You Find a Good Manager?](https://www.nber.org/papers/w32699) NBER Working Paper 32699.
 - Weidmann, B., Xu, Y., & Deming, D. J. (2025). [Measuring Human Leadership Skills with AI Agents](https://www.nber.org/papers/w33662). NBER Working Paper 33662.
 - Stehlík, L. (2025). [Novel way to measure leadership skills via causal inference (and AI)?](https://blog-about-people-analytics.netlify.app/posts/2025-06-12-causal-impact-of-leadership-skills/)
 
