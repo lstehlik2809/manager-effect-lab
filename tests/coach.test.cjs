@@ -3,16 +3,19 @@ const assert = require('assert');
 const PZ = require('../src/puzzles.js');
 const C = require('../src/coach.js');
 const SCR = require('../src/scripted.js');
+const S = require('../src/stats.js');
 
 let failures = 0;
 function check(name, fn) {
   try { fn(); console.log('ok   ' + name); }
   catch (e) { failures++; console.log('FAIL ' + name + '\n     ' + e.message); }
 }
-const t1 = PZ.PUZZLES.find(p => p.id === 't1'), s1 = PZ.PUZZLES.find(p => p.id === 's1');
+const t1 = PZ.PUZZLES.find(p => p.id === 't1'), t3 = PZ.PUZZLES.find(p => p.id === 't3'), s1 = PZ.PUZZLES.find(p => p.id === 's1');
 const num = (p, re) => p.clues.find(c => re.test(c.text)).num;
-const CAPPING = num(t1, /capping head was replaced/), LABEL_WET = num(t1, /only jams when bottles reach it wet/), DRY = num(t1, /completely dry/);
-const AUTO = num(t1, /fully automatic mode all night/), MOTOR = num(t1, /conveyor motor's current log/);
+// t1: Mira holds the Linden & Sons rule-out and the only report on Dario Ricci; Theo the Bruno Keller rule-out;
+// Jonas the Elin Berg (pigment) rule-out. In t3 the leader's own report rules out Clean Rivers Trust.
+const LINDEN = num(t1, /made only gilded frames/), DARIO = num(t1, /Dario Ricci taught/), PANELS = num(t1, /only on wooden panels/);
+const PIGMENT = num(t1, /blue pigment/), CLEAN = num(t3, /donation last year/);
 
 /** Play a chat with the scripted teammates: each leader message gets replies from everyone it reaches. */
 function play(p, script) {
@@ -75,7 +78,6 @@ check('repeated general requests earn no extra credit and are named in the feedb
 });
 
 check('broad requests that draw out every decisive report are praised as efficient, not second-guessed', () => {
-  const t3 = PZ.PUZZLES.find(p => p.id === 't3');
   const results = [t1, t3].map(p => {
     const msgs = play(p, [['all', 'Please share all your reports.'], ['all', 'Please share all your reports.']]);
     const a = C.analyse(p, msgs, even);
@@ -102,37 +104,37 @@ check('a message to everyone that mentions a teammate is not a question to that 
   const aud = text => C.audienceOf({ from: 'leader', to: 'all', text }).join(',');
   const ALL = 'f1,f2,f3';
   // mentioned, not addressed
-  assert.strictEqual(aud('Theo mentioned the label applicator jams when bottles are wet. Were the bottles dry?'), ALL);
-  assert.strictEqual(aud('Theo said it only jams with wet bottles - does anyone know if they were dry?'), ALL);
-  assert.strictEqual(aud('What did Theo say about the applicator?'), ALL);
+  assert.strictEqual(aud('Theo mentioned that Bruno Keller painted on panels. Was the portrait on canvas?'), ALL);
+  assert.strictEqual(aud('Theo said it is on canvas - does anyone know about the pigment?'), ALL);
+  assert.strictEqual(aud('What did Theo say about Bruno Keller?'), ALL);
   assert.strictEqual(aud('Do you agree with Theo?'), ALL);
   assert.strictEqual(aud('Is Theo\'s report about the update?'), ALL);
   assert.strictEqual(aud('Can someone ask Theo about it?'), ALL);
-  assert.strictEqual(aud('Thanks Theo. Were the bottles dry?'), ALL);
+  assert.strictEqual(aud('Thanks Theo. Was it on canvas?'), ALL);
   assert.strictEqual(aud('Mira, what do you have? Anyone else?'), ALL);
   // addressed
-  assert.strictEqual(aud('Theo, what do you have on the label applicator?'), 'f2');
-  assert.strictEqual(aud('What do you have on the label applicator, Theo?'), 'f2');
-  assert.strictEqual(aud('Hi Theo! Anything on the software update?'), 'f2');
+  assert.strictEqual(aud('Theo, what do you have on Bruno Keller?'), 'f2');
+  assert.strictEqual(aud('What do you have on Bruno Keller, Theo?'), 'f2');
+  assert.strictEqual(aud('Hi Theo! Anything on Oakley Brothers?'), 'f2');
   assert.strictEqual(aud('Theo what do you have?'), 'f2');
-  assert.strictEqual(aud('Jonas were the bottles dry?'), 'f3');
+  assert.strictEqual(aud('Jonas were the frames gilded?'), 'f3');
   assert.strictEqual(aud('What about you Theo?'), 'f2');
-  assert.strictEqual(aud('@Jonas can you check the dry bottles report'), 'f3');
+  assert.strictEqual(aud('@Jonas can you check the pigment report'), 'f3');
   assert.strictEqual(aud('Theo, thanks. Anything else?'), 'f2');
-  assert.strictEqual(aud('Thanks Theo! Mira, what about the capping head?'), 'f1');
-  assert.strictEqual(aud('Mira and Jonas, anything on the vision sensor?'), 'f1,f3');
+  assert.strictEqual(aud('Thanks Theo! Mira, what about Linden & Sons?'), 'f1');
+  assert.strictEqual(aud('Mira and Jonas, anything on Elin Berg?'), 'f1,f3');
   assert.strictEqual(aud('Hi team, Theo what do you have?'), 'f2');
   assert.strictEqual(C.audienceOf({ from: 'leader', to: 'f1', text: 'Theo said so. Agree?' }).join(','), 'f1');
 
   // the feedback: a broadcast that mentions Theo reaches everyone and is not a direct question to Theo
-  const msgs = play(t1, [['f2', 'Theo, anything on the label applicator?'], ['all', 'Theo said the label applicator jams when bottles are wet. Were the bottles dry when they reached it?']]);
+  const msgs = play(t1, [['f2', 'Theo, anything on Bruno Keller?'], ['all', 'Theo said the portrait is on canvas. Does anyone have anything on the pigment in the paint?']]);
   const a = C.analyse(t1, msgs, even);
   assert.deepStrictEqual(a.metrics.askedDirect, ['f2']);
   assert.deepStrictEqual(a.metrics.askedAny, ['f1', 'f2', 'f3']);
   assert.strictEqual(a.metrics.broadcast, 1);
-  assert(a.metrics.surfacedNums.includes(DRY), 'Jonas answered the broadcast: ' + a.metrics.surfacedNums.join(','));
+  assert(a.metrics.surfacedNums.includes(PIGMENT), 'Jonas answered the broadcast: ' + a.metrics.surfacedNums.join(','));
   // and the scripted teammates answer it rather than leaving it to Theo
-  assert(SCR.reply(t1, 'f3', [{ from: 'leader', to: 'all', text: 'Theo said the label applicator jams when bottles are wet. Were the bottles dry?' }], new Set()).includes('#' + DRY));
+  assert(SCR.reply(t1, 'f3', [{ from: 'leader', to: 'all', text: 'Theo said the portrait is on canvas. Does anyone have anything on the pigment?' }], new Set()).includes('#' + PIGMENT));
 });
 
 check('the same general question to different people is not a repeat', () => {
@@ -144,20 +146,20 @@ check('the same general question to different people is not a repeat', () => {
 
 check('specific questions, follow-ups and connecting teammates are recognised', () => {
   const msgs = play(t1, [
-    ['f2', 'Theo, what do you have on the label applicator?'],
-    ['f3', 'Jonas, were the bottles dry when they reached it?'],
-    ['all', 'Did the capping head fail?']
+    ['f2', 'Theo, what do you have on Bruno Keller?'],
+    ['f3', 'Jonas, Theo says the portrait is on canvas. Does that fit anything on the pigment?'],
+    ['all', 'Who has anything on Linden & Sons?']
   ]);
   const a = C.analyse(t1, msgs, even);
   assert.strictEqual(a.metrics.targeted, 3, 'targeted ' + a.metrics.targeted);
   assert(a.metrics.followUps >= 1 && a.metrics.connects >= 1, JSON.stringify(a.metrics));
-  assert(a.metrics.surfacedNums.includes(LABEL_WET) && a.metrics.surfacedNums.includes(DRY) && a.metrics.surfacedNums.includes(CAPPING), a.metrics.surfacedNums.join(','));
+  assert(a.metrics.surfacedNums.includes(PANELS) && a.metrics.surfacedNums.includes(PIGMENT) && a.metrics.surfacedNums.includes(LINDEN), a.metrics.surfacedNums.join(','));
   assert(a.observations.some(o => o.key === 'best-ask'), 'credits the question that drew out a decisive report');
   assert(a.observations.some(o => o.key === 'connect'));
 });
 
 check('missed reports name who held them and what they rule out', () => {
-  const msgs = play(t1, [['all', 'Hi team!'], ['f1', 'Mira, anything on the capping head?']]);
+  const msgs = play(t1, [['all', 'Hi team!'], ['f1', 'Mira, anything on Pellow Workshop?']]);
   const a = C.analyse(t1, msgs, even);
   const missed = a.observations.filter(o => o.key === 'missed' || o.key === 'missed-2');
   assert(missed.length >= 1, 'has a missed-report tip');
@@ -166,9 +168,9 @@ check('missed reports name who held them and what they rule out', () => {
 });
 
 check('points split: hidden + use + score = 100, and the best possible answer scores best', () => {
-  const msgs = play(t1, [['f1', 'Mira, what about the capping head?']]);
-  // the best answer with what the leader has: own reports rule out the conveyor motor (Q1) and a power surge (public, Q2)
-  const avail = new Set(t1.clues.filter(c => c.holder === 'leader' || c.holder === 'public').map(c => c.num).concat([CAPPING]));
+  const msgs = play(t1, [['f1', 'Mira, what about Linden & Sons?']]);
+  // the best answer with what the leader has: in t1 the leader's and the shared reports rule nothing out, Mira's rules out Linden & Sons
+  const avail = new Set(t1.clues.filter(c => c.holder === 'leader' || c.holder === 'public').map(c => c.num).concat([LINDEN]));
   const ans = t1.questions.map((q, qi) => { const out = C.ruledOut(t1, qi, avail); const left = [0, 1, 2, 3, 4].filter(k => !out.has(k)); const a = [0, 0, 0, 0, 0]; left.forEach((k, i) => { a[k] = Math.floor(100 / left.length) + (i < 100 % left.length ? 1 : 0); }); return a; });
   const a = C.analyse(t1, msgs, ans);
   a.info.perQ.forEach(x => assert(Math.abs(x.hidden + x.use + x.actual - 100) < 1e-9));
@@ -178,17 +180,18 @@ check('points split: hidden + use + score = 100, and the best possible answer sc
 });
 
 check('keeping an option your own report rules out is pointed out', () => {
-  const a = C.analyse(t1, [], [[20, 20, 20, 20, 20], [0, 100, 0, 0, 0]]);
+  const a = C.analyse(t3, [], [[20, 20, 20, 20, 20], [100, 0, 0, 0, 0]]);
   const kept = a.observations.find(o => o.key === 'kept');
-  assert(kept && kept.text.includes('your report #' + MOTOR) && kept.text.includes('Conveyor motor'), kept && kept.text);
+  assert(kept && kept.text.includes('your report #' + CLEAN) && kept.text.includes('Clean Rivers Trust'), kept && kept.text);
   assert(a.observations.some(o => o.key === 'dropped'), 'zeroing a right answer is pointed out');
   assert(a.observations.some(o => o.key === 'no-questions'));
 });
 
 check('solo puzzles get reasoning feedback only', () => {
-  const a = C.analyse(s1, [], [[50, 0, 0, 50, 0], [0, 0, 0, 0, 100]]);
+  const right = s1.questions.map(q => S.correctDist(q.answer, 5));
+  const a = C.analyse(s1, [], right);
   assert(a.observations.some(o => o.key === 'perfect'));
-  const b = C.analyse(s1, [], [[20, 20, 20, 20, 20], [0, 0, 0, 0, 100]]);
+  const b = C.analyse(s1, [], [[20, 20, 20, 20, 20], right[1]]);
   assert(b.observations.some(o => o.key === 'kept' && /^The reports rule out/.test(o.text)), b.observations.map(o => o.text).join(' | '));
   assert(!b.observations.some(o => /missed|repeats|generic/.test(o.key)));
 });
@@ -196,14 +199,15 @@ check('solo puzzles get reasoning feedback only', () => {
 check('scripted teammates: addressing, topics, report numbers, more, views', () => {
   const sh = () => new Set();
   const m = text => [{ from: 'leader', to: 'all', text }];
-  assert.strictEqual(SCR.reply(t1, 'f1', m('Theo, what do you have on the software update?'), sh()), '', 'Mira stays quiet when Theo is named');
-  assert(SCR.reply(t1, 'f2', m('Theo, what do you have on the software update?'), sh()).length > 0);
-  assert(SCR.reply(t1, 'f1', m('What about the capping head?'), sh()).includes('#' + CAPPING));
-  assert(/nothing|don't see/i.test(SCR.reply(t1, 'f2', m('What about the capping head?'), sh())), 'Theo has nothing on the capping head');
-  assert(SCR.reply(t1, 'f1', m('Mira, is report #' + AUTO + ' about manual mode?'), sh()).includes('#' + AUTO));
+  assert.strictEqual(SCR.reply(t1, 'f1', m('Theo, what do you have on Clara Moss?'), sh()), '', 'Mira stays quiet when Theo is named');
+  assert(SCR.reply(t1, 'f2', m('Theo, what do you have on Clara Moss?'), sh()).length > 0);
+  assert(SCR.reply(t1, 'f1', m('What about Linden & Sons?'), sh()).includes('#' + LINDEN));
+  assert(SCR.reply(t1, 'f1', m('What about Dario Ricci?'), sh()).includes('#' + DARIO));
+  assert(/nothing|don't see/i.test(SCR.reply(t1, 'f2', m('What about Dario Ricci?'), sh())), 'Theo has nothing on Dario Ricci');
+  assert(SCR.reply(t1, 'f1', m('Mira, is report #' + LINDEN + ' about gilded frames?'), sh()).includes('#' + LINDEN));
   assert(/^(Hi|Hey|Hello)/.test(SCR.reply(t1, 'f3', m('Hi team!'), sh())));
   // a question asked by its wording gets reports on that question only
-  const q1 = SCR.reply(t1, 'f1', m('What do you have on which component failed?'), sh()), q1nums = (q1.match(/#(\d+)/g) || []).map(x => +x.slice(1));
+  const q1 = SCR.reply(t1, 'f1', m('What do you have on which artists could have painted it?'), sh()), q1nums = (q1.match(/#(\d+)/g) || []).map(x => +x.slice(1));
   assert(q1nums.length && q1nums.every(n => t1.clues.find(c => c.num === n).q === 0), q1);
   // "anything else?" carries on, and a teammate with nothing left says so
   const s = sh(), msgs = [{ from: 'leader', to: 'f3', text: 'Jonas, what do you have?' }];
@@ -213,14 +217,13 @@ check('scripted teammates: addressing, topics, report numbers, more, views', () 
   assert(/#\d+/.test(r2), r2);
   for (let k = 0; k < 4; k++) { msgs.push({ from: 'f3', to: 'leader', text: SCR.reply(t1, 'f3', msgs, s) }); msgs.push({ from: 'leader', to: 'f3', text: 'Anything else?' }); }
   assert(/everything|nothing more/i.test(SCR.reply(t1, 'f3', msgs, s)));
-  assert(/rule out|ruled out|drop/i.test(SCR.reply(t1, 'f1', [{ from: 'leader', to: 'f1', text: 'Mira, what do you think about question 1?' }], sh())));
+  assert(/rule out|ruled out|drop/i.test(SCR.reply(t1, 'f1', [{ from: 'leader', to: 'f1', text: 'Mira, what do you think about question 2?' }], sh())));
 });
 
 check('summary: specific strengths and tips across puzzles; repeating a request rates lower than asking well', () => {
-  const t3 = PZ.PUZZLES.find(p => p.id === 't3');
   const good = [
-    { p: t1, script: [['all', 'Hi team, what do you have on question 1?'], ['f2', 'Theo, anything on the label applicator?'], ['f3', 'Jonas, were the bottles dry?'], ['all', 'Anything on operator error or manual mode?']] },
-    { p: t3, script: [['all', 'Who has anything on Bruno or the forklift certificate?'], ['f2', 'Theo, what about Daria and Emil?'], ['all', 'When is the fire inspection?']] }
+    { p: t1, script: [['all', 'Hi team, what do you have on question 1?'], ['f2', 'Theo, anything on Bruno Keller?'], ['f3', 'Jonas, anything on Elin Berg or the pigment?'], ['all', 'Anything on Linden & Sons, Oakley Brothers or Marlow Frames?']] },
+    { p: t3, script: [['all', 'Who has anything on Ashford Park or Brookside Park?'], ['f1', 'Mira, what about Elmwood Common?'], ['all', 'Anything on Youth Sports Fund, Animal Rescue League or Elder Care Network?']] }
   ].map(x => ({ title: x.p.title, solo: false, analysis: C.analyse(x.p, play(x.p, x.script), even) }));
   const spam = [t1, t3].map(p => ({ title: p.title, solo: false, analysis: C.analyse(p, play(p, [['f1', 'Share everything.'], ['f1', 'Share everything.'], ['f1', 'Share everything.']]), even) }));
   const G = C.summarise(good), X = C.summarise(spam);

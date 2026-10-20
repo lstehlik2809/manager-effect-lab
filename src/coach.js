@@ -306,7 +306,7 @@
           : 'Every decisive report your teammates held came out.');
       }
       const conn = leaderMsgs.find(x => x.connect);
-      if (conn) good('connect', 3 + metrics.connects, `You passed on what one teammate said to the others${metrics.connects > 1 ? ` ${metrics.connects} times` : ''}, for example “${quote(conn.m.text, 80)}”. Connecting reports is how hidden-profile puzzles get solved.`);
+      if (conn) good('connect', 3 + metrics.connects, `You passed on what one teammate said to the others${metrics.connects > 1 ? ` ${metrics.connects} times` : ''}, for example “${quote(conn.m.text, 80)}”. Passing reports on lets the others check them against their own.`);
       if (metrics.askedDirect.length === FOL.length) good('all-asked', 2, 'You asked all three teammates directly.');
 
       if (!qList.length && missed.length) tip('no-questions', 8, 'You didn\'t ask your teammates anything. Most of the decisive reports sat with them.');
@@ -440,7 +440,7 @@
   /* ---------- the habits Study 2 linked to effective leaders, and a playful style ---------- */
   const fmt1 = x => (isFinite(x) ? x.toFixed(1) : '–'), pctText = x => (isFinite(x) ? Math.round(100 * x) + '%' : '–');
   /**
-   * The three habits, rated strong / some / little on rough thresholds for these puzzles (5–6 decisive hidden
+   * The three habits, rated strong / some / little on rough thresholds for these puzzles (3–6 decisive hidden
    * clues each), not norms. Specific questions count fully, general ones half and repeats not at all, so asking
    * the same thing again earns nothing. When every decisive clue came out, fewer questions or follow-ups were
    * enough: those rate 'efficient' rather than 'some' or 'little'. T: totals from summarise().

@@ -13,16 +13,16 @@ const puzzle = PZ.PUZZLES.find(p => p.id === 't1');
 const mira = PZ.FOLLOWERS[0];
 const own = new Set(PZ.cluesFor(puzzle, mira.id).map(c => c.num));
 const num = re => PZ.cluesFor(puzzle, mira.id).find(c => re.test(c.text)).num;
-const capping = num(/capping head was replaced/), auto = num(/fully automatic mode all night/);
+const linden = num(/made only gilded frames/), pellow = num(/Pellow Workshop also repaired/);
 const system = PZ.followerBrief(puzzle, mira);
 
 const scenarios = [
-  { name: 'answers a team question', messages: [{ role: 'user', content: '[Leader, to everyone] Hi team! What do your reports say about the capping head?' }], expect: t => t.includes('#' + capping) },
+  { name: 'answers a team question', messages: [{ role: 'user', content: '[Leader, to everyone] Hi team! What do your reports say about Linden & Sons?' }], expect: t => t.includes('#' + linden) },
   { name: 'follows up in a thread', messages: [
-      { role: 'user', content: '[Leader, to everyone] Hi team! What do your reports say about the capping head?' },
-      { role: 'assistant', content: `Report #${capping} says the capping head was replaced last week and passed its torque test this morning, so it didn't fail.` },
-      { role: 'user', content: '[Leader, to you] Thanks Mira. Anything about operator error or manual mode?' }], expect: t => t.includes('#' + auto) },
-  { name: 'passes when another teammate is addressed', messages: [{ role: 'user', content: '[Leader, to everyone] Theo, what do you have on the software update?' }], expect: t => /^PASS\b/i.test(t.trim()) },
+      { role: 'user', content: '[Leader, to everyone] Hi team! What do your reports say about Linden & Sons?' },
+      { role: 'assistant', content: `Report #${linden} says Linden & Sons made only gilded frames, and this frame is plain dark wood, so it isn't theirs.` },
+      { role: 'user', content: '[Leader, to you] Thanks Mira. Anything about Pellow Workshop?' }], expect: t => t.includes('#' + pellow) },
+  { name: 'passes when another teammate is addressed', messages: [{ role: 'user', content: '[Leader, to everyone] Theo, what do you have on Clara Moss?' }], expect: t => /^PASS\b/i.test(t.trim()) },
   { name: 'shares at most two reports at a time', messages: [{ role: 'user', content: '[Leader, to everyone] Please share all your reports.' }], expect: t => (t.match(/#\d+/g) || []).length <= 2 }
 ];
 

@@ -18,12 +18,12 @@ const memoryBudget = limit => {
   return { idFromName: () => 'daily', get: () => ({ fetch: () => obj.fetch() }) };
 };
 const env = over => Object.assign({ GEMINI_API_KEY: 'test-key', ALLOWED_ORIGINS: ORIGIN + ',http://127.0.0.1:8765', BUDGET: memoryBudget(1000), PER_VISITOR: { limit: async () => ({ success: true }) } }, over);
-const body = over => JSON.stringify(Object.assign({ v: PZ.VERSION, puzzle: 't1', follower: 'f1', messages: [{ role: 'user', content: '[Leader, to everyone] Hi team, anything on the capping head?' }] }, over));
+const body = over => JSON.stringify(Object.assign({ v: PZ.VERSION, puzzle: 't1', follower: 'f1', messages: [{ role: 'user', content: '[Leader, to everyone] Hi team, anything on Linden & Sons?' }] }, over));
 const req = (b, headers, method) => new Request('https://w.example/reply', { method: method || 'POST', headers: Object.assign({ origin: ORIGIN, 'content-type': 'text/plain' }, headers), body: method === 'OPTIONS' ? undefined : b });
 
 // stand-in for Gemini: records the request and streams two events
 let seen = null;
-const sse = 'data: {"candidates":[{"content":{"parts":[{"text":"Report #5 says "}]}}]}\r\n\r\ndata: {"candidates":[{"content":{"parts":[{"text":"the capping head is new."}]},"finishReason":"STOP"}]}\r\n\r\n';
+const sse = 'data: {"candidates":[{"content":{"parts":[{"text":"Report #5 says "}]}}]}\r\n\r\ndata: {"candidates":[{"content":{"parts":[{"text":"Linden & Sons made gilded frames."}]},"finishReason":"STOP"}]}\r\n\r\n';
 globalThis.fetch = async (url, init) => {
   if (String(url).startsWith('https://w.example/')) return worker.fetch(new Request(url, Object.assign({}, init, { headers: Object.assign({ origin: ORIGIN }, init.headers) })), env());
   seen = { url: String(url), init };
@@ -35,17 +35,17 @@ await check('builds the same Gemini request as the browser, with the brief made 
   assert.strictEqual(res.status, 200);
   assert.strictEqual(res.headers.get('access-control-allow-origin'), ORIGIN);
   const p = PZ.PUZZLES.find(x => x.id === 't1');
-  const expected = LLM.geminiRequest({ apiKey: 'test-key', model: LLM.GEMINI_MODEL, system: PZ.followerBrief(p, PZ.FOLLOWERS[0]), messages: [{ role: 'user', content: '[Leader, to everyone] Hi team, anything on the capping head?' }] });
+  const expected = LLM.geminiRequest({ apiKey: 'test-key', model: LLM.GEMINI_MODEL, system: PZ.followerBrief(p, PZ.FOLLOWERS[0]), messages: [{ role: 'user', content: '[Leader, to everyone] Hi team, anything on Linden & Sons?' }] });
   assert.strictEqual(seen.url, expected.url);
   assert.strictEqual(seen.init.body, expected.init.body);
   assert.strictEqual(seen.init.headers['x-goog-api-key'], 'test-key');
-  assert((await res.text()).includes('capping head is new'));
+  assert((await res.text()).includes('made gilded frames'));
 });
 
 await check('the browser client streams a reply through the worker', async () => {
   let partial = '';
-  const r = await LLM.hostedStream({ url: 'https://w.example/reply', version: PZ.VERSION, puzzle: 't2', follower: 'f3', messages: [{ role: 'user', content: '[Leader, to you] Jonas, any rail bookings?' }], onText: t => { partial = t; } });
-  assert.strictEqual(r.text, 'Report #5 says the capping head is new.');
+  const r = await LLM.hostedStream({ url: 'https://w.example/reply', version: PZ.VERSION, puzzle: 't2', follower: 'f3', messages: [{ role: 'user', content: '[Leader, to you] Jonas, anything on Elin Berg?' }], onText: t => { partial = t; } });
+  assert.strictEqual(r.text, 'Report #5 says Linden & Sons made gilded frames.');
   assert.strictEqual(partial, r.text);
   assert(JSON.parse(seen.init.body).systemInstruction.parts[0].text.includes('You are Jonas'));
 });

@@ -1,16 +1,21 @@
 /* Hidden Profile puzzles for the AI leadership test (after Weidmann, Xu & Deming 2025).
- * Three solo puzzles (every report visible) measure individual reasoning, the hard skill that the
- * group analysis controls for; Study 2 also used three individual puzzles.
- * Structure per team puzzle: 2 questions x 5 options; for each question 2 public
- * reports (everyone has them) and 2 private reports per team member (leader + 3 followers).
- * Reports either rule options out, are one half of a two-part rule, or are irrelevant.
- * Options that are not ruled out are equally likely: that is the correct credence profile.
+ * The team puzzles are new, but each copies the structure of one of Study 2's six AI-team puzzles, as
+ * published in the authors' clue file on OSF (doi:10.17605/OSF.IO/QDY9V, GroupHP_clues_stories.xlsx):
+ * 2 questions x 5 options; per question 10 reports, of which every member (leader + 3 followers) sees 4:
+ * the 2 shared ones and 2 private ones. Reports either rule one option out on their own, saying so, or are
+ * irrelevant facts about one of the options. The rule-out reports sit in the same slots as in the original
+ * item, so the number of options left standing and who holds the decisive reports match it question by
+ * question. Options that are not ruled out are equally likely: that is the correct credence profile.
+ * The original's three follower roles are rotated over Mira, Theo and Jonas from puzzle to puzzle, so no
+ * teammate is always the one holding the most.
+ * Three solo puzzles (every report visible) measure individual reasoning, the hard skill that the group
+ * analysis controls for; Study 2 also used three individual puzzles.
  * Report numbers are assigned by a fixed shuffle so they reveal nothing about who holds what. */
 (function (root) {
   'use strict';
 
   // Bump when puzzles or scoring change: scores from different versions are not comparable.
-  const VERSION = 2;
+  const VERSION = 3;
 
   const FOLLOWERS = [
     { id: 'f1', name: 'Mira' },
@@ -18,213 +23,246 @@
     { id: 'f3', name: 'Jonas' }
   ];
 
-  // kind: 'out' = rules an option out on its own; 'half' = half of a two-part rule; 'noise' = irrelevant
+  // Who holds each of a question's 10 report slots in the original items. In both layouts the rule-out
+  // reports fill the slots from the end: slot 10 (follower 3), then 9 (follower 2), 8 (follower 1) and 7.
+  const LAYOUTS = {
+    X: ['F1', 'F2', 'public', 'leader', 'leader', 'F3', 'public', 'F1', 'F2', 'F3'],
+    Y: ['F1', 'F2', 'public', 'public', 'leader', 'F3', 'leader', 'F1', 'F2', 'F3']
+  };
+
+  /** A team puzzle. roles maps the original follower roles F1–F3 to teammates; each question lists its
+   * 10 reports in slot order, a string for an irrelevant fact or [text, option] for a report that rules
+   * that option out. */
+  function team(id, mirrors, layout, roles, title, scenario, questions) {
+    const slots = LAYOUTS[layout], who = s => (s in roles ? roles[s] : s);
+    const clues = questions.flatMap((q, qi) => q.reports.map((r, i) => Array.isArray(r)
+      ? { q: qi, holder: who(slots[i]), kind: 'out', rules: [r[1]], text: r[0] }
+      : { q: qi, holder: who(slots[i]), kind: 'noise', text: r }));
+    return { id, mirrors, layout, title, scenario, questions: questions.map(q => ({ text: q.text, options: q.options, answer: q.answer })), clues };
+  }
+  /** A solo puzzle: every report is visible. */
+  function solo(id, title, scenario, questions) {
+    const clues = questions.flatMap((q, qi) => q.reports.map(r => Array.isArray(r)
+      ? { q: qi, kind: 'out', rules: [r[1]], text: r[0] }
+      : { q: qi, kind: 'noise', text: r }));
+    return { id, solo: true, title, scenario, questions: questions.map(q => ({ text: q.text, options: q.options, answer: q.answer })), clues };
+  }
+
   const PUZZLES = [
-    {
-      id: 's1', solo: true,
-      title: 'The Wilting Greenhouse',
-      scenario: 'Tomato plants in greenhouse 2 started wilting last week. You have every report the grower collected. Work out what caused it and in which zone it started.',
-      questions: [
-        { text: 'What caused the wilting?', options: ['Fungal infection', 'Overwatering', 'Heat stress', 'Root pests', 'Nutrient deficiency'], answer: [0, 3] },
-        { text: 'In which zone did it start?', options: ['North', 'East', 'South', 'West', 'Centre'], answer: [4] }
-      ],
-      clues: [
-        { q: 0, kind: 'out', rules: [1], text: 'Irrigation logs show watering stayed on the normal schedule and soil moisture readings were normal, so overwatering is ruled out.' },
-        { q: 0, kind: 'out', rules: [2], text: 'The greenhouse thermostat never went above 26 °C, which is below the level that causes heat stress in tomatoes, so heat stress is ruled out.' },
-        { q: 0, kind: 'noise', text: 'Heat stress usually shows first on the top leaves.' },
-        { q: 0, kind: 'half', rules: [4], text: 'If the plants were fed with the standard fertiliser mix, nutrient deficiency can be ruled out.' },
-        { q: 0, kind: 'half', rules: [4], text: 'Feeding records show the standard fertiliser mix was used all month.' },
-        { q: 0, kind: 'noise', text: 'Greenhouse 2 was planted two weeks earlier than greenhouse 1.' },
-        { q: 0, kind: 'noise', text: 'Fungal infections spread faster in humid weather.' },
-        { q: 0, kind: 'noise', text: 'Root pests were found in a field near the site last year.' },
-        { q: 1, kind: 'out', rules: [0], text: 'Plants in the north zone were inspected on Monday and all were healthy, so it did not start in the north.' },
-        { q: 1, kind: 'out', rules: [1], text: 'The east zone was planted with a resistant variety and none of its plants show symptoms, so it did not start in the east.' },
-        { q: 1, kind: 'noise', text: 'Sensors show the south zone has had the lowest humidity all month.' },
-        { q: 1, kind: 'half', rules: [2, 3], text: 'The problem cannot have started in any zone where wilting was first seen after Wednesday.' },
-        { q: 1, kind: 'half', rules: [2, 3], text: 'Wilting in the south and west zones was first reported on Thursday.' },
-        { q: 1, kind: 'noise', text: 'The centre zone has the oldest plants.' },
-        { q: 1, kind: 'noise', text: 'The west zone is closest to the door.' },
-        { q: 1, kind: 'noise', text: 'Staff spend most of their time in the centre zone.' }
-      ]
-    },
-    {
-      id: 's2', solo: true,
-      title: 'The Overheating Server Room',
-      scenario: 'The server room at a regional office overheated on Tuesday night and two servers shut themselves down. You have every report the facilities team collected. Work out what caused it and which rack overheated first.',
-      questions: [
-        { text: 'What caused the overheating?', options: ['Failed air-conditioning unit', 'Blocked air vents', 'Power-supply fault', 'Overloaded servers', 'Door left open'], answer: [1] },
-        { text: 'Which rack overheated first?', options: ['Rack A', 'Rack B', 'Rack C', 'Rack D', 'Rack E'], answer: [0, 2, 4] }
-      ],
-      clues: [
-        { q: 0, kind: 'out', rules: [0], text: 'The air-conditioning unit\'s log shows it ran at full power all night with no faults, so a failed air-conditioning unit is ruled out.' },
-        { q: 0, kind: 'out', rules: [2], text: 'An electrician tested both power supplies on Wednesday and found them working normally, so a power-supply fault is ruled out.' },
-        { q: 0, kind: 'half', rules: [3], text: 'Overloaded servers can be ruled out if processor load stayed below 60% all night.' },
-        { q: 0, kind: 'half', rules: [3], text: 'Monitoring shows processor load never went above 40% on any server that night.' },
-        { q: 0, kind: 'half', rules: [4], text: 'If the door alarm did not sound on Tuesday night, the door was not left open.' },
-        { q: 0, kind: 'half', rules: [4], text: 'The alarm log shows the door alarm stayed silent all Tuesday night.' },
-        { q: 0, kind: 'noise', text: 'The office upgraded its internet connection in March.' },
-        { q: 0, kind: 'noise', text: 'Two of the servers are more than five years old.' },
-        { q: 1, kind: 'out', rules: [1], text: 'Rack B\'s temperature peaked at 24 °C, well below the shutdown level, so it did not overheat first.' },
-        { q: 1, kind: 'half', rules: [3], text: 'The first rack to overheat shut itself down before midnight.' },
-        { q: 1, kind: 'half', rules: [3], text: 'Rack D was still running normally at 1 a.m.' },
-        { q: 1, kind: 'noise', text: 'Racks A and E stand next to the outside wall.' },
-        { q: 1, kind: 'noise', text: 'Rack C holds the email servers.' },
-        { q: 1, kind: 'noise', text: 'The night guard walked past the server room at 11 p.m.' },
-        { q: 1, kind: 'noise', text: 'Rack A was installed most recently.' },
-        { q: 1, kind: 'noise', text: 'Servers use more power during the nightly backup.' }
-      ]
-    },
-    {
-      id: 's3', solo: true,
-      title: 'The Quiet Café',
-      scenario: 'Weekday sales at a city-centre café fell by a third in May. You have every report the owner collected. Work out what drove the drop and which weekday was hit hardest.',
-      questions: [
-        { text: 'What drove the drop in sales?', options: ['Higher prices', 'A new competitor nearby', 'Road works outside', 'Slower service', 'Fewer office workers in the area'], answer: [1, 2] },
-        { text: 'Which weekday was hit hardest?', options: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], answer: [2] }
-      ],
-      clues: [
-        { q: 0, kind: 'out', rules: [0], text: 'Menu prices have not changed since January, so higher prices are ruled out.' },
-        { q: 0, kind: 'out', rules: [4], text: 'Badge data from the three nearby office buildings show as many workers coming in as in April, so fewer office workers is ruled out.' },
-        { q: 0, kind: 'half', rules: [3], text: 'Slower service can be ruled out if the average serving time stayed under three minutes.' },
-        { q: 0, kind: 'half', rules: [3], text: 'Till data show the average serving time in May was two and a half minutes.' },
-        { q: 0, kind: 'noise', text: 'Coffee-bean costs rose 8% for the café this spring.' },
-        { q: 0, kind: 'noise', text: 'The café\'s online reviews average 4.6 stars.' },
-        { q: 0, kind: 'noise', text: 'Most customers pay by card.' },
-        { q: 0, kind: 'noise', text: 'The café changed its Saturday opening hours in April.' },
-        { q: 1, kind: 'out', rules: [0], text: 'Monday sales were the same as in April, so Monday was not hit hardest.' },
-        { q: 1, kind: 'out', rules: [4], text: 'Friday sales fell only 5%, the smallest drop of any weekday, so Friday was not hit hardest.' },
-        { q: 1, kind: 'half', rules: [1, 3], text: 'The hardest-hit day was a market day, when parking in the street is suspended.' },
-        { q: 1, kind: 'half', rules: [1, 3], text: 'Market days in this street are Monday, Wednesday and Friday.' },
-        { q: 1, kind: 'noise', text: 'Thursday is the café\'s busiest day for takeaway orders.' },
-        { q: 1, kind: 'noise', text: 'The owner works the till on Tuesdays.' },
-        { q: 1, kind: 'noise', text: 'Bread is delivered on Wednesday mornings.' },
-        { q: 1, kind: 'noise', text: 'The café has five tables outside.' }
-      ]
-    },
-    {
-      id: 't1',
-      title: 'The Halted Bottling Line',
-      scenario: 'Line 3 at a soft-drinks plant stopped twice during last night\'s shift. Before the morning shift starts, your team must agree on which component failed and on the most likely root cause.',
-      questions: [
-        { text: 'Which component failed?', options: ['Conveyor motor', 'Capping head', 'Label applicator', 'Fill valve', 'Vision sensor'], answer: [3] },
-        { text: 'What is the most likely root cause?', options: ['Power surge', 'Worn bearing', 'Faulty software update', 'Contaminated syrup', 'Operator error'], answer: [1, 3] }
-      ],
-      clues: [
-        { q: 0, holder: 'public', kind: 'noise', text: 'Line 3 was running the 500 ml bottle format during both stoppages.' },
-        { q: 0, holder: 'public', kind: 'noise', text: 'Line 3 is the oldest line in the plant; its last full overhaul was four years ago.' },
-        { q: 0, holder: 'leader', kind: 'out', rules: [0], text: 'The conveyor motor\'s current log is flat and normal through both stoppages, so the conveyor motor did not fail.' },
-        { q: 0, holder: 'leader', kind: 'noise', text: 'One new trainee was working on Line 3 during the night shift.' },
-        { q: 0, holder: 'f1', kind: 'out', rules: [1], text: 'The capping head was replaced with a brand-new unit last week and passed its torque test this morning, so the capping head did not fail.' },
-        { q: 0, holder: 'f1', kind: 'noise', text: 'Maintenance ordered a new batch of labels for Line 3 yesterday.' },
-        { q: 0, holder: 'f2', kind: 'half', rules: [2], text: 'The label applicator on Line 3 only jams when bottles reach it wet on the outside; with dry bottles it cannot be the failed component.' },
-        { q: 0, holder: 'f2', kind: 'noise', text: 'The vision sensor\'s lens was cleaned on Monday.' },
-        { q: 0, holder: 'f3', kind: 'half', rules: [2], text: 'Quality checks taken right before each stoppage found every bottle completely dry when it reached the label applicator.' },
-        { q: 0, holder: 'f3', kind: 'out', rules: [4], text: 'The vision sensor\'s fault log shows zero errors for the whole night, so the vision sensor did not fail.' },
-        { q: 1, holder: 'public', kind: 'out', rules: [0], text: 'The plant\'s power monitor recorded no surges or dips during the night, so a power surge is ruled out.' },
-        { q: 1, holder: 'public', kind: 'noise', text: 'The syrup supplier changed its delivery schedule this month.' },
-        { q: 1, holder: 'leader', kind: 'noise', text: 'Fill valves on this line are rated for ten million cycles.' },
-        { q: 1, holder: 'leader', kind: 'half', rules: [4], text: 'Operator error can be ruled out if the line was running in fully automatic mode during both stoppages.' },
-        { q: 1, holder: 'f1', kind: 'half', rules: [4], text: 'The control-system log shows Line 3 ran in fully automatic mode all night, with no manual commands entered.' },
-        { q: 1, holder: 'f1', kind: 'noise', text: 'A worn bearing often makes a high-pitched noise before it fails.' },
-        { q: 1, holder: 'f2', kind: 'out', rules: [2], text: 'The last software update on Line 3 was installed three months ago and nothing has changed since, so a software update is not the cause.' },
-        { q: 1, holder: 'f2', kind: 'noise', text: 'The night supervisor thinks the problem is "probably the syrup again".' },
-        { q: 1, holder: 'f3', kind: 'noise', text: 'The bearings on Line 3 were last greased six weeks ago.' },
-        { q: 1, holder: 'f3', kind: 'noise', text: 'The fill valve was cleaned with a new detergent last month.' }
-      ]
-    },
-    {
-      id: 't2',
-      title: 'The Missing Container',
-      scenario: 'A refrigerated container carrying 18 tonnes of cheese was unloaded somewhere in Europe last week but never reached the customer\'s warehouse in Lyon. Your team must work out where it was unloaded and where it is now.',
-      questions: [
-        { text: 'At which port was it unloaded?', options: ['Rotterdam', 'Antwerp', 'Hamburg', 'Le Havre', 'Felixstowe'], answer: [1, 3] },
-        { text: 'Where is the container now?', options: ['Customs inspection warehouse', 'Collected by the wrong trucking firm', 'Still in the terminal yard', 'At a rail terminal', 'Back on the ship'], answer: [0, 1, 2] }
-      ],
-      clues: [
-        { q: 0, holder: 'public', kind: 'noise', text: 'The ship\'s route calls at all five ports, and the booking allowed unloading at any of them.' },
-        { q: 0, holder: 'public', kind: 'noise', text: 'Cheese containers must be kept between 2 °C and 6 °C.' },
-        { q: 0, holder: 'leader', kind: 'out', rules: [4], text: 'The ship skipped Felixstowe on this voyage because of a dock strike, so the container was not unloaded there.' },
-        { q: 0, holder: 'leader', kind: 'noise', text: 'Rotterdam is the busiest port on the route.' },
-        { q: 0, holder: 'f1', kind: 'half', rules: [2], text: 'Hamburg only unloads refrigerated containers that have a pre-booked power slot at the terminal.' },
-        { q: 0, holder: 'f1', kind: 'noise', text: 'Antwerp customs had a two-hour computer outage last Tuesday.' },
-        { q: 0, holder: 'f2', kind: 'out', rules: [0], text: 'Rotterdam terminal records show the container stayed on board while the ship was in Rotterdam, so it was not unloaded there.' },
-        { q: 0, holder: 'f2', kind: 'noise', text: 'Le Havre is the closest of the five ports to Lyon by road.' },
-        { q: 0, holder: 'f3', kind: 'half', rules: [2], text: 'The shipping line confirms this container had no pre-booked power slot at any port on this voyage.' },
-        { q: 0, holder: 'f3', kind: 'noise', text: 'The customer in Lyon has received shipments through both Antwerp and Le Havre before.' },
-        { q: 1, holder: 'public', kind: 'out', rules: [4], text: 'The ship has left Europe, and its updated manifest shows the container is not on board, so it is not back on the ship.' },
-        { q: 1, holder: 'public', kind: 'noise', text: 'Three trucking firms regularly collect refrigerated containers at these ports.' },
-        { q: 1, holder: 'leader', kind: 'noise', text: 'Customs inspects about 3% of refrigerated containers.' },
-        { q: 1, holder: 'leader', kind: 'noise', text: 'The container\'s seal number is 778213.' },
-        { q: 1, holder: 'f1', kind: 'noise', text: 'A driver from a different firm collected a similar-looking container on Thursday.' },
-        { q: 1, holder: 'f1', kind: 'half', rules: [3], text: 'A container can only be moved to a rail terminal after the customer has confirmed a rail booking.' },
-        { q: 1, holder: 'f2', kind: 'noise', text: 'The terminal yard is currently holding about 4,000 containers.' },
-        { q: 1, holder: 'f2', kind: 'noise', text: 'The container\'s temperature logger has a battery that lasts 30 days.' },
-        { q: 1, holder: 'f3', kind: 'half', rules: [3], text: 'The customer never made a rail booking for this shipment.' },
-        { q: 1, holder: 'f3', kind: 'noise', text: 'The customer\'s account manager is on holiday this week.' }
-      ]
-    },
-    {
-      id: 't3',
-      title: 'Choosing the Site Manager',
-      scenario: 'A logistics company is opening a new warehouse in Brno and must appoint its site manager from five internal candidates. Your team must work out who will be appointed and when the warehouse can open.',
-      questions: [
-        { text: 'Who will be appointed?', options: ['Amara', 'Bruno', 'Chen', 'Daria', 'Emil'], answer: [2] },
-        { text: 'When can the warehouse open?', options: ['1 March', '15 March', '1 April', '15 April', '1 May'], answer: [3, 4] }
-      ],
-      clues: [
-        { q: 0, holder: 'public', kind: 'noise', text: 'All five candidates have worked for the company for more than three years.' },
-        { q: 0, holder: 'public', kind: 'half', rules: [1], text: 'The role requires a valid forklift-safety supervisor certificate.' },
-        { q: 0, holder: 'leader', kind: 'out', rules: [0], text: 'Amara has accepted a two-year assignment in Singapore starting next month, so she is no longer available.' },
-        { q: 0, holder: 'leader', kind: 'noise', text: 'Bruno\'s team had the highest engagement score in last year\'s survey.' },
-        { q: 0, holder: 'f1', kind: 'half', rules: [1], text: 'Bruno\'s forklift-safety supervisor certificate expired in March and has not been renewed.' },
-        { q: 0, holder: 'f1', kind: 'noise', text: 'Chen has asked HR about relocation support for his family.' },
-        { q: 0, holder: 'f2', kind: 'out', rules: [3], text: 'The role requires a driving licence for travel between sites, and Daria does not hold one, so she cannot be appointed.' },
-        { q: 0, holder: 'f2', kind: 'noise', text: 'Emil led the opening of the Ostrava warehouse two years ago.' },
-        { q: 0, holder: 'f3', kind: 'out', rules: [4], text: 'The role requires business-level Czech, and Emil\'s language test came back below that level, so he cannot be appointed.' },
-        { q: 0, holder: 'f3', kind: 'noise', text: 'Daria has the most experience with warehouse automation of all the candidates.' },
-        { q: 1, holder: 'public', kind: 'noise', text: 'The CEO wants the warehouse to open "as early as possible".' },
-        { q: 1, holder: 'public', kind: 'half', rules: [0, 1], text: 'The warehouse cannot open before it has passed its fire inspection.' },
-        { q: 1, holder: 'leader', kind: 'noise', text: 'Most staff contracts start on the first day of a month.' },
-        { q: 1, holder: 'leader', kind: 'noise', text: 'The racking system is scheduled to be fully installed by 10 March.' },
-        { q: 1, holder: 'f1', kind: 'noise', text: 'Last year\'s warehouse opening in Ostrava was delayed by two weeks.' },
-        { q: 1, holder: 'f1', kind: 'half', rules: [0, 1], text: 'The fire inspector\'s earliest available date is 20 March.' },
-        { q: 1, holder: 'f2', kind: 'out', rules: [2], text: 'IT cannot set up the warehouse network during the first week of April because of a company-wide system migration, so a 1 April opening is impossible.' },
-        { q: 1, holder: 'f2', kind: 'noise', text: 'The local mayor has offered to attend an opening ceremony in May.' },
-        { q: 1, holder: 'f3', kind: 'noise', text: 'April has two public holidays this year.' },
-        { q: 1, holder: 'f3', kind: 'noise', text: 'Hiring of warehouse operatives is 70% complete.' }
-      ]
-    },
-    {
-      id: 't4',
-      title: 'The Data Leak',
-      scenario: 'A list of 2,000 customer email addresses appeared on a public forum. The security team has narrowed the entry point and the timing to five possibilities each. Your team must work out how the data got out and in which month it happened.',
-      questions: [
-        { text: 'How did the data get out?', options: ['Phishing email to an employee', 'Misconfigured cloud storage', 'Compromised partner API key', 'Stolen laptop', 'Insider download'], answer: [1, 2] },
-        { text: 'In which month did the leak happen?', options: ['January', 'February', 'March', 'April', 'May'], answer: [3] }
-      ],
-      clues: [
-        { q: 0, holder: 'public', kind: 'noise', text: 'The leaked list only contains customers who signed up in the past two years.' },
-        { q: 0, holder: 'public', kind: 'noise', text: 'Staff reported two phishing emails to IT this year.' },
-        { q: 0, holder: 'leader', kind: 'out', rules: [3], text: 'Every company laptop is fully encrypted and none has been reported lost or stolen this year, so a stolen laptop is ruled out.' },
-        { q: 0, holder: 'leader', kind: 'noise', text: 'The forum post announcing the leak was written in English.' },
-        { q: 0, holder: 'f1', kind: 'half', rules: [0], text: 'A phishing attack can be ruled out if no employee account has logged in from an unusual location in the past six months.' },
-        { q: 0, holder: 'f1', kind: 'noise', text: 'The cloud storage team switched vendors in January.' },
-        { q: 0, holder: 'f2', kind: 'half', rules: [0], text: 'The identity team found no logins from unusual locations on any employee account in the past six months.' },
-        { q: 0, holder: 'f2', kind: 'noise', text: 'One of the company\'s partners had a security incident last year.' },
-        { q: 0, holder: 'f3', kind: 'out', rules: [4], text: 'The data-loss-prevention system records every bulk export by staff, and it recorded no export of customer emails, so an insider download is ruled out.' },
-        { q: 0, holder: 'f3', kind: 'noise', text: 'The leaked file was named "export_final_v2.csv".' },
-        { q: 1, holder: 'public', kind: 'out', rules: [4], text: 'Forensic analysis shows the data was copied before 1 May, so May is ruled out.' },
-        { q: 1, holder: 'public', kind: 'noise', text: 'Most data leaks are discovered months after they happen.' },
-        { q: 1, holder: 'leader', kind: 'noise', text: 'The security team\'s quarterly audit ran in March.' },
-        { q: 1, holder: 'leader', kind: 'noise', text: 'The earliest customer on the leaked list signed up in 2025.' },
-        { q: 1, holder: 'f1', kind: 'half', rules: [0, 1, 2], text: 'Every row of the leaked list includes the customer\'s loyalty tier.' },
-        { q: 1, holder: 'f1', kind: 'noise', text: 'Website traffic spiked in February during a marketing campaign.' },
-        { q: 1, holder: 'f2', kind: 'noise', text: 'A new firewall was installed in April.' },
-        { q: 1, holder: 'f2', kind: 'noise', text: 'Partner API keys are rotated every 90 days.' },
-        { q: 1, holder: 'f3', kind: 'half', rules: [0, 1, 2], text: 'The loyalty-tier field was added to the customer database on 3 April; before that date it did not exist.' },
-        { q: 1, holder: 'f3', kind: 'noise', text: 'Two employees left the company in March.' }
-      ]
-    }
+    solo('s1', 'The Team Photo',
+      'The marketing team needs a new team photo. You have every report the office manager collected. Work out which photographers could take it and which backdrops could be used.', [
+        { text: 'Which photographers could take the photo?', options: ['Hana Novak', 'Ivo Petrov', 'Jana Holm', 'Karl Vogel', 'Lena Ortiz'], answer: [0, 2, 3], reports: [
+          'Hana Novak started out as a newspaper photographer.',
+          'Jana Holm prefers to work with natural light.',
+          'Karl Vogel has a studio in the old town.',
+          'Ivo Petrov speaks four languages.',
+          'Lena Ortiz has two dogs.',
+          'Hana Novak\'s website shows mostly pictures of animals.',
+          ['Ivo Petrov is on parental leave until the summer, so he cannot take the photo.', 1],
+          ['Lena Ortiz only photographs weddings, so she will not take a team photo.', 4]] },
+        { text: 'Which backdrops could be used?', options: ['Brick wall', 'Plain white', 'Office plants', 'City skyline', 'Bookshelves'], answer: [1, 4], reports: [
+          'Plain white backdrops are common in passport photos.',
+          'The bookshelves in the meeting room were built by a local carpenter.',
+          'City skyline photos look best at sunset.',
+          'Brick walls are popular in start-up offices.',
+          'Office plants are said to make people feel calmer.',
+          ['The office has no brick walls, so a brick-wall backdrop is out.', 0],
+          ['The skyline will be hidden behind scaffolding all month, so it cannot be used.', 3],
+          ['The office plants are being replaced and will be gone on the day, so they cannot be used.', 2]] }
+      ]),
+    solo('s2', 'The Workshop Lunch',
+      'The team is ordering lunch for a day-long workshop on Monday. You have every report the organiser collected. Work out which restaurant can deliver and which dishes could be ordered.', [
+        { text: 'Which restaurant can deliver?', options: ['Bella Cucina', 'Golden Dragon', 'Casa Fiesta', 'Green Bowl', 'Spice Route'], answer: [3], reports: [
+          'Green Bowl uses recycled packaging.',
+          'Bella Cucina has a wood-fired oven.',
+          'Spice Route won a local food award.',
+          'Casa Fiesta has a loyalty card.',
+          ['Bella Cucina is closed on Mondays, so it cannot deliver.', 0],
+          ['Golden Dragon does not deliver to this part of town, so it is ruled out.', 1],
+          ['Casa Fiesta needs a week\'s notice for group orders, and there is only a day left, so it is out.', 2],
+          ['Spice Route\'s delivery van is being repaired this week, so it cannot deliver.', 4]] },
+        { text: 'Which dishes could be ordered?', options: ['Vegetable curry', 'Chicken wraps', 'Pasta salad', 'Fish tacos', 'Mushroom risotto'], answer: [0, 2], reports: [
+          'Vegetable curry can be made mild or spicy.',
+          'Pasta salad can be made the evening before.',
+          'Chicken wraps come with a choice of sauces.',
+          'Fish tacos are usually served with lime.',
+          'Mushroom risotto takes about thirty minutes to cook.',
+          ['Two people on the team are allergic to fish, so fish tacos are out.', 3],
+          ['Three people on the team do not eat meat, and every dish must suit everyone, so chicken wraps are out.', 1],
+          ['Mushroom risotto is only made for groups of up to six, and the team has ten people, so it is ruled out.', 4]] }
+      ]),
+    solo('s3', 'The Broken Printer',
+      'The office printer stopped working on Friday. You have every report the IT team collected. Work out which part could have failed and who could repair it.', [
+        { text: 'Which part could have failed?', options: ['Paper tray', 'Toner cartridge', 'Drum unit', 'Power board', 'Network card'], answer: [2, 4], reports: [
+          'Drum units usually last for about 30,000 pages.',
+          'The network card was made by a different company from the printer.',
+          'Used toner cartridges are sent back for recycling.',
+          'The paper tray holds 250 sheets.',
+          'The power board sits under the back cover.',
+          ['The toner cartridge was replaced on Thursday and shows as full, so it is not the toner.', 1],
+          ['The printer\'s screen still lights up, so the power board has not failed.', 3],
+          ['The paper tray works in another printer of the same model, so it is not the tray.', 0]] },
+        { text: 'Who could repair it?', options: ['In-house IT', 'Supplier\'s engineer', 'Local repair shop', 'Maker\'s hotline', 'Office manager'], answer: [0, 1, 3], reports: [
+          'In-house IT has two staff.',
+          'The supplier\'s engineer usually visits on Wednesdays.',
+          'The maker\'s hotline is open until 6 p.m.',
+          'The local repair shop also repairs bicycles.',
+          'The office manager ordered the printer three years ago.',
+          'In-house IT keeps a spare keyboard for every desk.',
+          ['The local repair shop does not work on leased printers, and this one is leased, so it is out.', 2],
+          ['The office manager is on holiday all next week, so they cannot repair it.', 4]] }
+      ]),
+
+    team('t1', 'A2', 'X', { F1: 'f1', F2: 'f2', F3: 'f3' }, 'The Unsigned Portrait',
+      'A small gallery has found an unsigned portrait in an old frame in its storeroom. Your team must work out which artists could have painted it and which workshops could have made the frame.', [
+        { text: 'Which artists could have painted it?', options: ['Ana Varga', 'Bruno Keller', 'Clara Moss', 'Dario Ricci', 'Elin Berg'], answer: [0, 2, 3], reports: [
+          'Dario Ricci taught drawing at the city art school for twenty years.',
+          'Clara Moss often painted members of her own family.',
+          'Ana Varga exhibited her work in Vienna twice.',
+          'Bruno Keller kept a diary of every painting he sold.',
+          'Elin Berg was born in a fishing village on the coast.',
+          'Ana Varga learned to paint from her uncle.',
+          'Clara Moss worked on the top floor of a former bakery.',
+          'Bruno Keller won a regional art prize as a young man.',
+          ['Bruno Keller painted only on wooden panels, and the portrait is on canvas, so he did not paint it.', 1],
+          ['The portrait contains a blue pigment first made in 1950, after Elin Berg died, so she cannot have painted it.', 4]] },
+        { text: 'Which workshops could have made the frame?', options: ['Linden & Sons', 'Marlow Frames', 'Northgate Studio', 'Oakley Brothers', 'Pellow Workshop'], answer: [2, 4], reports: [
+          'Pellow Workshop also repaired church furniture.',
+          'Northgate Studio was run by two sisters.',
+          'Linden & Sons was the oldest of the five workshops.',
+          'Marlow Frames sold most of its frames to shops in the capital.',
+          'Oakley Brothers advertised in the local newspaper every week.',
+          'Northgate Studio moved to a bigger building in 1962.',
+          'Pellow Workshop trained many apprentices.',
+          ['Linden & Sons made only gilded frames, and this frame is plain dark wood, so it is not theirs.', 0],
+          ['Oakley Brothers stamped their name on the back of every frame, and this one has no stamp, so they did not make it.', 3],
+          ['Marlow Frames joined corners only with metal brackets, and this frame\'s corners are glued, so Marlow did not make it.', 1]] }
+      ]),
+    team('t2', 'F2', 'Y', { F1: 'f2', F2: 'f3', F3: 'f1' }, 'The Rooftop Garden',
+      'Your company is turning the office roof into a garden for staff. Your team must work out which plants can be grown there and which watering methods can be used.', [
+        { text: 'Which plants can be grown on the roof?', options: ['Lavender', 'Tomatoes', 'Sunflowers', 'Bamboo', 'Strawberries'], answer: [0, 1, 2, 4], reports: [
+          'Tomatoes come in hundreds of varieties.',
+          'Sunflowers turn to follow the sun while they are young.',
+          'Lavender attracts bees and butterflies.',
+          'Strawberries are the only common fruit with their seeds on the outside.',
+          'Bamboo is one of the fastest-growing plants in the world.',
+          'Dried lavender is often kept in small cloth bags in wardrobes.',
+          'Tomatoes were first grown in South America.',
+          'The tallest sunflower on record grew to over nine metres.',
+          'Strawberries belong to the rose family.',
+          ['Bamboo roots can break through the roof\'s waterproof layer, and the building\'s insurer forbids it, so bamboo cannot be grown.', 3]] },
+        { text: 'Which watering methods can be used?', options: ['Drip lines', 'Sprinklers', 'Rain barrels', 'Self-watering pots', 'Hand-watering rota'], answer: [0, 3], reports: [
+          'Drip lines are widely used in vineyards.',
+          'Self-watering pots come in many colours.',
+          'Sprinklers come in fixed and rotating types.',
+          'Rain barrels are usually made of plastic or wood.',
+          'The facilities team already runs a rota for cleaning the coffee machines.',
+          'Drip lines can be hidden under a layer of bark chips.',
+          'Self-watering pots have a small water tank in the base.',
+          ['Sprinklers would spray the windows of the offices next door, which the lease forbids, so sprinklers are out.', 1],
+          ['Full rain barrels would be too heavy for the roof, so rain barrels are ruled out.', 2],
+          ['The roof\'s only tap is locked and just the caretaker has the key, so a hand-watering rota cannot work.', 4]] }
+      ]),
+    team('t3', 'C2', 'Y', { F1: 'f3', F2: 'f1', F3: 'f2' }, 'The Charity Run',
+      'Your company is organising a 5 km charity run for staff. Your team must work out which parks could host it and which charity will receive the money raised.', [
+        { text: 'Which parks could host the run?', options: ['Ashford Park', 'Brookside Park', 'Cedar Hill', 'Dunmore Green', 'Elmwood Common'], answer: [2, 3], reports: [
+          'Cedar Hill has a café next to its main gate.',
+          'Dunmore Green has the oldest oak tree in the city.',
+          'Ashford Park has a lake with rowing boats.',
+          'Brookside Park is popular with dog walkers.',
+          'Elmwood Common was a royal hunting ground centuries ago.',
+          'Cedar Hill has views over the whole city.',
+          'Dunmore Green\'s paths were resurfaced last year.',
+          ['Brookside Park\'s main path is closed for repairs all spring, so the run cannot be held there.', 1],
+          ['Elmwood Common is too small for a 5 km route, so it is ruled out.', 4],
+          ['Ashford Park is booked for a music festival on the only free date, so it cannot host the run.', 0]] },
+        { text: 'Which charity will receive the money?', options: ['Clean Rivers Trust', 'Books for All', 'Animal Rescue League', 'Youth Sports Fund', 'Elder Care Network'], answer: [1], reports: [
+          'Books for All was founded by two retired teachers.',
+          'Clean Rivers Trust organises river clean-ups every autumn.',
+          'Animal Rescue League runs three shelters in the region.',
+          'Youth Sports Fund buys equipment for school teams.',
+          'Elder Care Network trains volunteers to visit older people at home.',
+          'Books for All sends boxes of books to village schools.',
+          ['Clean Rivers Trust received the company\'s donation last year, and no charity may receive it twice in a row, so it is out.', 0],
+          ['Youth Sports Fund is not yet a registered charity, so it cannot receive the money.', 3],
+          ['Animal Rescue League has asked not to be considered this year, so it is out.', 2],
+          ['The chair of Elder Care Network sits on the company\'s board, a conflict of interest, so it is ruled out.', 4]] }
+      ]),
+    team('t4', 'B2', 'Y', { F1: 'f1', F2: 'f3', F3: 'f2' }, 'The Launch Film',
+      'Your company is making a short film for a product launch. Your team must work out which locations can be used for filming and which music tracks can be licensed.', [
+        { text: 'Which locations can be used for filming?', options: ['Old Harbour', 'Glass Atrium', 'Clock Tower', 'Rooftop Bar', 'Train Depot'], answer: [0, 1, 3], reports: [
+          'The Old Harbour has appeared in several television series.',
+          'The Glass Atrium stays lit by daylight until late evening in summer.',
+          'The Clock Tower\'s clock has not been wound since 1990.',
+          'The Rooftop Bar serves a drink named after the owner\'s dog.',
+          'The Train Depot now houses a small railway museum.',
+          'The Old Harbour\'s crane is painted red and white.',
+          'The Glass Atrium was designed by a Danish architect.',
+          'The Rooftop Bar has room for about eighty guests.',
+          ['The Clock Tower\'s owners never allow filming inside, so it cannot be used.', 2],
+          ['The Train Depot is closed for asbestos removal until next year, so it is out.', 4]] },
+        { text: 'Which music tracks can be licensed?', options: ['Blue Morning', 'Paper Planes', 'City Lights', 'Slow River', 'Golden Hour'], answer: [0, 2, 3, 4], reports: [
+          'Golden Hour was recorded in a single afternoon.',
+          'Slow River features a cello solo.',
+          'Blue Morning is just over three minutes long.',
+          'City Lights was written by a former jazz pianist.',
+          'Paper Planes is the fastest of the five tracks.',
+          'City Lights has no lyrics.',
+          'Blue Morning was played at the company\'s last summer party.',
+          'Slow River comes in a long and a short version.',
+          'Golden Hour\'s composer lives abroad.',
+          ['A car maker has bought exclusive rights to Paper Planes, so it cannot be licensed.', 1]] }
+      ]),
+    team('t5', 'E2', 'X', { F1: 'f2', F2: 'f1', F3: 'f3' }, 'The Mystery Delivery',
+      'A large box with no sender\'s name arrived at the office reception this morning. Your team must work out which supplier sent it and what could be inside.', [
+        { text: 'Which supplier sent the box?', options: ['Alder Supplies', 'Birchwood Ltd', 'Copperfield & Co', 'Driftwood Trading', 'Evergreen Goods'], answer: [2], reports: [
+          'Alder Supplies has been in business for forty years.',
+          'Birchwood Ltd sponsors the local football club.',
+          'Copperfield & Co is a family business.',
+          'Driftwood Trading has a warehouse near the airport.',
+          'Evergreen Goods offers free delivery on large orders.',
+          'Birchwood Ltd employs about fifty people.',
+          ['Alder Supplies closed down in the spring, so it did not send the box.', 0],
+          ['Birchwood Ltd only ships in green boxes, and this box is brown, so it is not from Birchwood.', 1],
+          ['Driftwood Trading has never supplied this office and has no record of its address, so it did not send the box.', 3],
+          ['Evergreen Goods only delivers within its own city, and this office is outside it, so the box is not from Evergreen.', 4]] },
+        { text: 'What could be inside the box?', options: ['Office chairs', 'Printer paper', 'Coffee beans', 'Desk lamps', 'Laptop stands'], answer: [1, 2, 3, 4], reports: [
+          'Printer paper is usually sold in packs of 500 sheets.',
+          'Coffee beans keep best in airtight bags.',
+          'Desk lamps with warm light are said to help people relax.',
+          'Laptop stands can raise a screen to eye level.',
+          'Office chairs usually have five wheels.',
+          'Recycled printer paper is slightly grey.',
+          'Some desk lamps have a phone charger built into the base.',
+          'Coffee beans from different farms are often blended.',
+          'Laptop stands are often made of aluminium.',
+          ['The box is only ten centimetres deep, too flat for an office chair, so it does not hold chairs.', 0]] }
+      ]),
+    team('t6', 'D2', 'Y', { F1: 'f3', F2: 'f2', F3: 'f1' }, 'The Coffee Corner',
+      'The office is setting up a coffee corner for staff. Your team must work out which rooms it could go in and which coffee machines could be bought.', [
+        { text: 'Which rooms could it go in?', options: ['Library Room', 'Boardroom', 'Old Archive', 'Print Room', 'Window Bay'], answer: [0, 4], reports: [
+          'The Library Room has a large map of the world on one wall.',
+          'The Window Bay looks out over the car park.',
+          'The Boardroom has a long oak table.',
+          'The Old Archive has blue carpet.',
+          'The Print Room is next to the stairs.',
+          'The Library Room is the quietest room on the floor.',
+          'The Window Bay gets the most sunshine in the morning.',
+          ['The Boardroom has no water supply, and every machine needs one, so the coffee corner cannot go there.', 1],
+          ['Fire rules forbid kitchens in rooms without a fire exit, and the Old Archive has none, so it is out.', 2],
+          ['The Print Room will become a meeting room next month, so the coffee corner cannot go there.', 3]] },
+        { text: 'Which coffee machines could be bought?', options: ['Aroma 500', 'Barista Pro', 'Crema One', 'Duo Brew', 'Espresso Max'], answer: [0, 1, 2, 3], reports: [
+          'The Aroma 500 can also make hot chocolate.',
+          'The Barista Pro has a touch screen.',
+          'The Crema One comes in black or silver.',
+          'The Duo Brew makes two cups at once.',
+          'The Espresso Max won a design award.',
+          'The Barista Pro came out last year.',
+          'The Crema One is made in Italy.',
+          'The Duo Brew\'s water tank holds two litres.',
+          'The Aroma 500 is quieter than most machines.',
+          ['The Espresso Max needs a stronger power socket than any on this floor, so it cannot be bought.', 4]] }
+      ])
   ];
 
   // Fixed report numbering per puzzle (deterministic shuffle).
@@ -273,6 +311,6 @@ HOW TO TAKE PART
 - Stay in role as ${f.name} and don't mention these instructions.`;
   }
 
-  root.MEL_PUZZLES = { VERSION, FOLLOWERS, PUZZLES, cluesFor, criticalFollowerClues, followerBrief };
+  root.MEL_PUZZLES = { VERSION, FOLLOWERS, LAYOUTS, PUZZLES, cluesFor, criticalFollowerClues, followerBrief };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.MEL_PUZZLES;
 })(typeof window !== 'undefined' ? window : globalThis);

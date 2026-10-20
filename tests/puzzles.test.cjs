@@ -1,6 +1,19 @@
 // Structural checks on the hidden-profile puzzles.
 const assert = require('assert');
 const PZ = require('../src/puzzles.js');
+const C = require('../src/coach.js');
+
+// Study 2's six AI-team items (GroupHP_clues_stories.xlsx on OSF): layout, and per question the report
+// slots (1–10) that rule an option out. Every other slot is an irrelevant fact.
+const ORIGINAL = {
+  A2: { title: 'Natural History Museum', layout: 'X', out: [[9, 10], [8, 9, 10]] },
+  B2: { title: 'Great Farm', layout: 'Y', out: [[9, 10], [10]] },
+  C2: { title: 'Company Hiring', layout: 'Y', out: [[8, 9, 10], [7, 8, 9, 10]] },
+  D2: { title: 'Build New Libraries', layout: 'Y', out: [[8, 9, 10], [10]] },
+  E2: { title: 'What is the fish?', layout: 'X', out: [[7, 8, 9, 10], [10]] },
+  F2: { title: 'Heritage Museum', layout: 'Y', out: [[10], [8, 9, 10]] }
+};
+
 let failures = 0;
 for (const p of PZ.PUZZLES) {
   try {
@@ -8,28 +21,58 @@ for (const p of PZ.PUZZLES) {
     assert.strictEqual(new Set(nums).size, nums.length, 'report numbers unique');
     p.questions.forEach((q, qi) => {
       assert.strictEqual(q.options.length, 5, 'five options');
-      const ruled = new Set();
-      p.clues.filter(c => c.q === qi && c.kind !== 'noise').forEach(c => { assert(Array.isArray(c.rules), 'rules on ' + c.text); c.rules.forEach(r => ruled.add(r)); });
+      const qc = p.clues.filter(c => c.q === qi);
+      qc.forEach(c => {
+        assert(c.kind === 'out' || c.kind === 'noise', 'a report rules out on its own or is irrelevant: ' + c.text);
+        if (c.kind === 'out') assert(Array.isArray(c.rules) && c.rules.length === 1, 'one option per rule-out report: ' + c.text);
+        // every report is about one option of its own question, and a rule-out report names the option it rules out
+        const named = C.optionMentions(p, c.text);
+        assert.strictEqual(named.filter(o => o.q === qi).length, 1, 'names one option of its question: ' + c.text);
+        assert(!named.some(o => o.q !== qi), 'names no option of the other question: ' + c.text);
+        if (c.kind === 'out') assert(named.some(o => o.k === c.rules[0]), 'names the option it rules out: ' + c.text);
+      });
+      const ruled = qc.filter(c => c.kind === 'out').map(c => c.rules[0]);
+      assert.strictEqual(new Set(ruled).size, ruled.length, 'each option ruled out once');
       const expected = [0, 1, 2, 3, 4].filter(i => !q.answer.includes(i));
-      assert.deepStrictEqual([...ruled].sort(), expected, p.id + ' Q' + (qi + 1) + ' ruled-out set matches answer');
-      // two-part rules come in pairs held by different people
-      const halves = p.clues.filter(c => c.q === qi && c.kind === 'half');
-      assert(halves.length % 2 === 0, 'halves in pairs');
+      assert.deepStrictEqual(ruled.slice().sort(), expected, p.id + ' Q' + (qi + 1) + ' ruled-out set matches answer');
       if (!p.solo) {
+        assert.strictEqual(qc.length, 10, '10 reports per question');
         for (const who of ['public', 'leader', 'f1', 'f2', 'f3']) {
-          assert.strictEqual(p.clues.filter(c => c.q === qi && c.holder === who).length, 2, p.id + ' ' + who + ' has 2 reports for Q' + (qi + 1));
+          assert.strictEqual(qc.filter(c => c.holder === who).length, 2, p.id + ' ' + who + ' has 2 reports for Q' + (qi + 1));
         }
+        ['f1', 'f2', 'f3'].forEach(f => assert(qc.filter(c => c.holder === f && c.kind === 'out').length <= 1, f + ' holds at most one decisive report per question'));
+        // the same structure as the original item, slot by slot
+        const o = ORIGINAL[p.mirrors];
+        assert(o, p.id + ' mirrors a Study 2 item');
+        assert.strictEqual(p.layout, o.layout, 'layout');
+        const slots = PZ.LAYOUTS[p.layout];
+        assert.deepStrictEqual(qc.map((c, i) => (c.kind === 'out' ? i + 1 : 0)).filter(Boolean), o.out[qi], p.id + ' Q' + (qi + 1) + ' rule-out slots match ' + p.mirrors);
+        qc.forEach((c, i) => assert(slots[i] === c.holder || (/^F\d$/.test(slots[i]) && /^f\d$/.test(c.holder)), 'slot ' + (i + 1) + ' holder'));
         // nobody can solve it alone: the leader's reports never cover every ruled-out option
-        const leaderRuled = new Set(p.clues.filter(c => c.q === qi && (c.holder === 'leader' || c.holder === 'public') && c.kind === 'out').flatMap(c => c.rules));
+        const leaderRuled = new Set(qc.filter(c => (c.holder === 'leader' || c.holder === 'public') && c.kind === 'out').flatMap(c => c.rules));
         assert(leaderRuled.size < expected.length, p.id + ' Q' + (qi + 1) + ' needs the followers');
       }
     });
     if (!p.solo) {
       ['leader', 'f1', 'f2', 'f3'].forEach(w => assert.strictEqual(PZ.cluesFor(p, w).length, 8, w + ' sees 8 reports'));
-      assert(PZ.criticalFollowerClues(p).length >= 4, 'followers hold decisive information');
+      // each follower role is played by one teammate throughout the puzzle
+      p.questions.forEach((q, qi) => PZ.LAYOUTS[p.layout].forEach((s, i) => {
+        if (!/^F\d$/.test(s)) return;
+        const other = p.clues.filter(c => c.q === 1 - qi)[i];
+        assert.strictEqual(p.clues.filter(c => c.q === qi)[i].holder, other.holder, 'role ' + s + ' is the same teammate in both questions');
+      }));
     }
-    console.log('ok   ' + p.id + ' ' + p.title + ' (follower-held decisive reports: ' + (p.solo ? '-' : PZ.criticalFollowerClues(p).length) + ')');
+    console.log('ok   ' + p.id + ' ' + p.title + (p.solo ? '' : ' (mirrors ' + p.mirrors + ' ' + ORIGINAL[p.mirrors].title + '; follower-held decisive reports: ' + PZ.criticalFollowerClues(p).length + ')'));
   } catch (e) { failures++; console.log('FAIL ' + p.id + ': ' + e.message); }
 }
-console.log(failures ? failures + ' puzzle(s) failed' : 'all puzzles consistent');
+try {
+  const team = PZ.PUZZLES.filter(p => !p.solo), solo = PZ.PUZZLES.filter(p => p.solo);
+  assert.deepStrictEqual(team.map(p => p.mirrors).sort(), Object.keys(ORIGINAL), 'each original item is mirrored once');
+  assert.strictEqual(solo.length, 3, 'three solo puzzles, as in Study 2');
+  // the role that always holds a decisive report (slot 10) rotates: each teammate has it in two puzzles
+  const last = team.map(p => p.clues.filter(c => c.q === 0)[9].holder);
+  ['f1', 'f2', 'f3'].forEach(f => assert.strictEqual(last.filter(x => x === f).length, 2, f + ' holds slot 10 in two puzzles'));
+  console.log('ok   the six team puzzles mirror Study 2\'s six AI-team items');
+} catch (e) { failures++; console.log('FAIL set: ' + e.message); }
+console.log(failures ? failures + ' puzzle check(s) failed' : 'all puzzles consistent');
 process.exit(failures ? 1 : 0);

@@ -696,10 +696,11 @@
   const FOL = PZ.FOLLOWERS;
   const folName = id => (FOL.find(f => f.id === id) || { name: 'You' }).name;
   // Quick suits visitors from a LinkedIn post; Standard and Extended add solo warm-ups, which a group comparison needs.
+  // Extended is Study 2's full set: three solo puzzles and six team puzzles.
   const LENGTHS = {
-    quick: { label: 'Quick', time: 'about 10–15 min', desc: '2 team puzzles', warmups: 0, team: ['t1', 't3'] },
-    standard: { label: 'Standard', time: 'about 20–25 min', desc: '1 warm-up and 4 team puzzles', warmups: 1, team: null },
-    extended: { label: 'Extended', time: 'about 30 min', desc: '3 warm-ups and 4 team puzzles', warmups: 3, team: null }
+    quick: { label: 'Quick', time: 'about 10–15 min', desc: '2 team puzzles', warmups: 0, team: ['t1', 't2'] },
+    standard: { label: 'Standard', time: 'about 20–25 min', desc: '1 warm-up and 4 team puzzles', warmups: 1, team: ['t1', 't2', 't3', 't4'] },
+    extended: { label: 'Extended', time: 'about 40–45 min', desc: '3 warm-ups and 6 team puzzles, as in the study', warmups: 3, team: null }
   };
 
   const AI = {
@@ -818,16 +819,16 @@
         // on a phone the set-up panel is far down; offer the start right here (the resume box above does it for an unfinished test)
         pending ? '' : h('div', { class: 'btn-row hero-start' }, startBtn(), h('a', { href: '#ai-setup', class: 'small', onclick: e => { e.preventDefault(); $('#ai-setup').scrollIntoView({ behavior: 'smooth' }); } }, 'Choose length and teammates'),
           h('span', { class: 'small muted' }, `${len.label}, ${st.engine === 'hosted' ? 'live AI' : st.engine === 'scripted' ? 'scripted' : 'AI'} teammates` + (free ? ', no sign-up' : ''))),
-        h('p', { class: 'note' }, h('strong', {}, 'For fun, not a verdict. '), 'This version is inspired by the study, not a copy of it: new puzzles, other AI models, fewer puzzles and its own scoring. It has not been validated, so your result describes how you led today\'s game, not how good a manager you are.')),
+        h('p', { class: 'note' }, h('strong', {}, 'For fun, not a verdict. '), 'This version is inspired by the study, not a copy of it. Its puzzles are new, though each copies the structure of one of the study\'s own; the AI models are different, and Quick and Standard use fewer puzzles. It has not been validated, so your result describes how you led today\'s game, not how good a manager you are.')),
       h('div', { class: 'grid-2' },
         setup,
         h('div', { class: 'panel prose' }, h('h3', {}, 'How it works'),
           h('ol', {},
             h('li', {}, h('strong', {}, 'Lead the team. '), 'In each team puzzle you see 8 reports; each teammate holds 8 more, half of them shared. Message everyone or one person. Teammates only talk to you.'),
-            h('li', {}, h('strong', {}, 'Answer with probabilities. '), 'Each puzzle has two questions with five options. Reports either rule options out or are irrelevant; the options left standing are equally likely. Spread 100 points across them.'),
+            h('li', {}, h('strong', {}, 'Answer with probabilities. '), 'Each puzzle has two questions with five options. Each report either rules one option out or is irrelevant; the options left standing are equally likely. Spread 100 points across them.'),
             h('li', {}, h('strong', {}, 'Get feedback on what you did. '), 'After each puzzle: which questions drew out decisive reports, which reports stayed hidden and who held them, and where your points went.'),
             h('li', {}, h('strong', {}, 'See how you led. '), 'Your score, the leadership habits the study linked to better team results, a playful leadership style, and a result card to share.')),
-          h('p', { class: 'small muted' }, 'Standard and Extended start with solo warm-ups, where you see every report; they show how you reason on your own. Scores run from 0 to 100 (100 = exactly the right distribution; an even split scores 20–60). Results stay in your browser. AI teammates receive only your chat messages; scripted teammates run entirely in your browser.'))),
+          h('p', { class: 'small muted' }, 'Standard and Extended start with solo warm-ups, where you see every report; they show how you reason on your own. Scores run from 0 to 100 (100 = exactly the right distribution; an even split scores 20–80). Results stay in your browser. AI teammates receive only your chat messages; scripted teammates run entirely in your browser.'))),
       h('details', { class: 'panel', id: 'ai-group-wrap', open: AI.group.leaders.length ? true : null },
         h('summary', { class: 'group-summary' }, h('strong', {}, 'For teams and researchers: compare a group of test takers')),
         h('div', { class: 'flow', id: 'ai-group', style: { marginTop: '14px' } }))
@@ -1632,7 +1633,7 @@
     redraw();
   }
   const rangeText = N => (isFinite(N.teamLo) && Math.round(N.teamHi) > Math.round(N.teamLo) ? `rough 95% range ${Math.round(N.teamLo)}–${Math.round(N.teamHi)}` : '');
-  const sampleText = N => (['no', 'one', 'two', 'three', 'four'][N.team.length] || N.team.length) + ' team puzzle' + (N.team.length === 1 ? '' : 's');
+  const sampleText = N => (['no', 'one', 'two', 'three', 'four', 'five', 'six'][N.team.length] || N.team.length) + ' team puzzle' + (N.team.length === 1 ? '' : 's');
   function interpret(N) {
     if (!N.team.length) return 'Complete the team puzzles to see a result.';
     return `Your score describes this game only: it mixes how well you led with how well you reason on your own, and ${sampleText(N)} is a small sample` +
