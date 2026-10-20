@@ -181,6 +181,7 @@
   const REPEAT_ADVICE = 'Asking again makes teammates recite their reports a couple at a time, relevant or not; asking about the options still standing gets the decisive ones sooner.';
   // Every decisive report out within this many requests counts as efficient: passing on the case facts takes one,
   // asking about each question's options two. Collecting every report two at a time takes three or more.
+  const DOUBT = /\b(sure|really|why|how so|certain|doesn'?t|does not|don'?t|not|isn'?t|is not|wrong|mistake|check|explain|enough|minimum|maximum|at least|so what)\b/i;
   const EFFICIENT_ASKS = 2;
   const NUM = ['no', 'one', 'two', 'three', 'four', 'five', 'six'];
 
@@ -403,16 +404,33 @@
       if (dyn.sure) {
         const s = dyn.sure, nm = nameOf(s.fid), opt = optName(s.q, s.option);
         // the teammate cites the misread report and says it rules the option out (a concession doesn't count)
-        const claimed = messages.some(m => m.from === s.fid && reportNums(m.text).includes(s.num) &&
-          /\brul(?:e|es|ed|ing)\s+(?:\w+\s+){0,2}out\b|\bexclud|\bdrop\b|\bcan'?t be\b/i.test(m.text) && !/\b(?:doesn'?t|does not|not|isn'?t|no longer)\s+(?:actually\s+)?(?:rule|clash)|stays in|after all/i.test(m.text) &&
-          optionMentions(p, m.text).some(o => o.q === s.q && o.k === s.option));
+        const CONCEDE = /\b(?:doesn'?t|does not|not|isn'?t|no longer)\s+(?:actually\s+)?(?:rule|clash)|stays in|after all/i;
+        const aboutOpt = text => optionMentions(p, text).some(o => o.q === s.q && o.k === s.option);
+        const claimAt = messages.findIndex(m => m.from === s.fid && reportNums(m.text).includes(s.num) &&
+          /\brul(?:e|es|ed|ing)\s+(?:\w+\s+){0,2}out\b|\bexclud|\bdrop\b|\bcan'?t be\b/i.test(m.text) && !CONCEDE.test(m.text) && aboutOpt(m.text));
+        const claimed = claimAt >= 0;
+        // questioned: after the claim, the leader doubts it in a message that reaches the teammate and is about the claim
+        // (its report, option or reasoning, or a direct reply to it), or the teammate takes it back. The answer alone is no evidence.
+        const claimToks = new Set(tokens(s.says + ' ' + clueBy.get(s.num).text));
+        let lastFrom = -1;
+        const questioned = claimed && messages.some((m, i) => {
+          if (i <= claimAt) { if (m.from === s.fid) lastFrom = i; return false; }
+          if (m.from === s.fid) { const back = (reportNums(m.text).includes(s.num) || aboutOpt(m.text)) && CONCEDE.test(m.text); lastFrom = i; return back; }
+          if (m.from !== 'leader') return false;
+          const aud = audienceOf(m);
+          if (!aud.includes(s.fid)) return false;
+          const about = reportNums(m.text).includes(s.num) || aboutOpt(m.text) || tokens(m.text).some(t => claimToks.has(t)) ||
+            (aud.length < FOL.length && lastFrom === claimAt);
+          return about && DOUBT.test(m.text);
+        });
         const kept = +answers[s.q][s.option] > 0;
-        metrics.claim = { fid: s.fid, made: claimed, kept };
+        metrics.claim = { fid: s.fid, made: claimed, kept, questioned };
         if (claimed) {
-          metrics.challenge = { kind: 'sure', fid: s.fid, met: kept };
+          metrics.challenge = { kind: 'sure', fid: s.fid, met: kept && questioned, kept };
           const cost = Math.round(100 - S.credenceScore(S.correctDist(p.questions[s.q].answer.filter(k => k !== s.option), 5), S.correctDist(p.questions[s.q].answer, 5)));
-          if (kept) good('checked', 12, `${nm} said report #${s.num} rules out ${opt}. You didn't take it on trust and kept ${opt}, which was right: ${s.why}`);
-          else tip('swayed', 9, `${nm} said report #${s.num} rules out ${opt}, and you ruled it out. It doesn't: ${s.why} ${opt} was one of the right answers on Q${s.q + 1}, so taking the claim on trust cost up to ${cost} points. When a teammate says a report rules an option out, check it against the case file yourself.`);
+          if (kept && questioned) good('checked', 12, `${nm} said report #${s.num} rules out ${opt}. You questioned the claim instead of taking it on trust and kept ${opt}, which was right: ${s.why}`);
+          else if (kept) good('kept-claim', 4, `${nm} said report #${s.num} rules out ${opt}. You kept ${opt} among the possibilities, which was right: ${s.why} The chat doesn't show you questioning the claim, though; asking ${nm} which case fact it clashes with makes sure.`);
+          else tip('swayed', 9, `${nm} said report #${s.num} rules out ${opt}, and ${questioned ? 'although you questioned it, ' : ''}you ruled it out. It doesn't: ${s.why} ${opt} was one of the right answers on Q${s.q + 1}, so ${questioned ? 'dropping it' : 'taking the claim on trust'} cost up to ${cost} points. When a teammate says a report rules an option out, check it against the case file yourself.`);
         }
       }
     }
@@ -489,7 +507,8 @@
       if (o.key === 'all-asked') { o.text = `You asked all three teammates directly in ${totals.allAsked} of ${n} team puzzles.`; o.weight = 1 + totals.allAsked; o.puzzle = null; }
       if (o.key === 'connect' && totals.connectsTotal > 1) o.weight += totals.connectsTotal;
       if (o.key === 'quiet' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate held back when you wrote to everyone, and each time you turned to them directly and drew out what they held.`; o.puzzle = null; }
-      if (o.key === 'checked' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate claimed a report rules out an option that it doesn't, and each time you checked instead of taking it on trust.`; o.puzzle = null; }
+      if (o.key === 'checked' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate claimed a report rules out an option that it doesn't, and each time you questioned the claim instead of taking it on trust.`; o.puzzle = null; }
+      if (o.key === 'kept-claim' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate claimed a report rules out an option that it doesn't, and each time you kept that option among the possibilities. The chat doesn't show you questioning the claims, though.`; o.puzzle = null; }
       if (o.key === 'context' && totals.contextPuzzles > 1) { o.text = `You told your teammates what the case file says in ${totals.contextPuzzles === n ? (n === 2 ? 'both' : 'all ' + n) : totals.contextPuzzles + ' of ' + n} team puzzles, so they could judge which of their reports rule an option out.`; o.weight += totals.contextPuzzles; o.puzzle = null; }
     });
     tips.forEach(o => {
@@ -528,16 +547,18 @@
    * The puzzles' twists add a sentence: how the leader dealt with a quiet teammate or a wrong claim. */
   function leaderStyle(hb, T) {
     const st = baseStyle(hb, T), ch = T.challenges || [];
-    const missedQuiet = ch.some(c => c.kind === 'quiet' && !c.met), swayed = ch.some(c => c.kind === 'sure' && !c.met);
+    const missedQuiet = ch.some(c => c.kind === 'quiet' && !c.met), swayed = ch.some(c => c.kind === 'sure' && !c.met && !c.kept);
+    const unchecked = ch.some(c => c.kind === 'sure' && !c.met && c.kept);
     const handled = ch.length && ch.every(c => c.met);
     let add = '';
     if (swayed && missedQuiet) add = 'Two things to watch: a quiet teammate kept what they knew, and you took a teammate\'s wrong claim on trust.';
     else if (swayed) add = 'One thing to watch: you took a teammate\'s wrong claim on trust. Check claims against the case file.';
     else if (missedQuiet) add = 'One thing to watch: a quiet teammate kept what they knew. Ask the quiet ones by name.';
+    else if (unchecked) add = (ch.some(c => c.kind === 'quiet') ? 'You drew out the quiet teammate. ' : '') + 'You kept the option a teammate wrongly ruled out, but didn\'t question the claim: ask which case fact it clashes with.';
     else if (handled) {
       const kinds = new Set(ch.map(c => c.kind));
-      add = kinds.size > 1 ? 'You also handled the teammates who made it harder: you drew out the quiet one and checked the overconfident one.'
-        : kinds.has('quiet') ? 'You also noticed the teammate who held back and drew them out.' : 'You also checked the teammate who claimed too much instead of taking it on trust.';
+      add = kinds.size > 1 ? 'You also handled the teammates who made it harder: you drew out the quiet one and questioned the overconfident one.'
+        : kinds.has('quiet') ? 'You also noticed the teammate who held back and drew them out.' : 'You also questioned the teammate who claimed too much instead of taking it on trust.';
     }
     return add ? { name: st.name, text: st.text + ' ' + add } : st;
   }

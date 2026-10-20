@@ -342,13 +342,28 @@ check('an overconfident teammate claims a clash that is not there once told the 
   trusting[s.q] = [0, 1, 2, 3, 4].map(k => (trusting[s.q][k] > 0 && k !== s.option ? 1 : 0)).map((x, k, xs) => (x ? Math.round(100 / xs.filter(Boolean).length) : 0));
   trusting[s.q][trusting[s.q].findIndex(x => x > 0)] += 100 - trusting[s.q].reduce((a, b) => a + b, 0);
   const a = C.analyse(T2, msgs, trusting);
-  assert.deepStrictEqual(a.metrics.challenge, { kind: 'sure', fid: s.fid, met: false });
+  assert.deepStrictEqual(a.metrics.challenge, { kind: 'sure', fid: s.fid, met: false, kept: false });
   const tip = a.observations.find(o => o.key === 'swayed');
   assert(tip && /Theo said report #\d+ rules out Strawberries/.test(tip.text) && /up to 25 points/.test(tip.text) && /case file yourself/.test(tip.text), tip && tip.text);
   assert(!a.observations.some(o => o.key === 'dropped'), 'no second tip about the same option');
+  // keeping the option without questioning the claim is not "checking" it: the answer alone is no evidence
   const b = C.analyse(T2, msgs, bestAnswer(T2, msgs));
-  assert.deepStrictEqual(b.metrics.challenge, { kind: 'sure', fid: s.fid, met: true });
-  assert(b.observations.some(o => o.key === 'checked' && o.tone === 'good'), b.observations.map(o => o.key).join(','));
+  assert.deepStrictEqual(b.metrics.challenge, { kind: 'sure', fid: s.fid, met: false, kept: true });
+  assert(!b.observations.some(o => o.key === 'checked'), b.observations.map(o => o.key).join(','));
+  const kc = b.observations.find(o => o.key === 'kept-claim');
+  assert(kc && kc.tone === 'good' && /kept Strawberries among the possibilities/.test(kc.text) && /doesn't show you questioning/.test(kc.text), kc && kc.text);
+  // leaving every answer at its default 20% earns no credit for checking either
+  const idle = C.analyse(T2, msgs, even);
+  assert(idle.metrics.challenge && !idle.metrics.challenge.met && !idle.observations.some(o => o.key === 'checked'), JSON.stringify(idle.metrics.challenge));
+  // questioning the claim, by name or by its report, and keeping the option is checking it
+  [['f2', 'Theo, are you sure? Roots of 15 cm fit in 40 cm beds.'], ['all', 'Why would #' + s.num + ' rule out Strawberries?'], ['f2', 'Really?']].forEach(q => {
+    const m2 = play(T2, [brief(T2), q]), c = C.analyse(T2, m2, bestAnswer(T2, m2));
+    assert.deepStrictEqual(c.metrics.challenge, { kind: 'sure', fid: s.fid, met: true, kept: true }, q[1]);
+    assert(c.observations.some(o => o.key === 'checked' && o.tone === 'good' && /questioned the claim/.test(o.text)), q[1]);
+  });
+  // a message to everyone about something else is no challenge
+  const other = play(T2, [brief(T2), ['all', 'Thanks. Anything else about the roof?']]);
+  assert(!C.analyse(T2, other, bestAnswer(T2, other)).metrics.challenge.met, other.map(m => m.text).join(' | '));
   // questioned, the teammate admits the mistake
   [['f2', 'Theo, are you sure? Roots of 15 cm fit in 40 cm beds.'], ['all', 'Why would #' + s.num + ' rule out Strawberries?']].forEach(q => {
     const m2 = play(T2, [brief(T2), q]), last = m2.filter(m => m.from === s.fid).pop();
@@ -377,7 +392,7 @@ check('the briefing routine meets both Quick twists; handling them is named in t
   const careful = [run(T1, [brief(T1), ['f3', 'Jonas, what about yours?']]), run(T2, [brief(T2), ['f2', 'Theo, are you sure? Roots of 15 cm fit in 40 cm beds.']])];
   const K = C.summarise(careful), ks = C.leaderStyle(C.habits(K.totals), K.totals);
   assert.strictEqual(K.totals.challenges.filter(c => c.met).length, 2);
-  assert(/drew out the quiet one and checked the overconfident one/.test(ks.text), ks.text);
+  assert(/drew out the quiet one and questioned the overconfident one/.test(ks.text), ks.text);
   assert(!K.tips.some(o => ['swayed', 'quiet'].includes(o.key)), K.tips.map(o => o.key).join(','));
 });
 

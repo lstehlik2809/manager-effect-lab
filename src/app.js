@@ -946,7 +946,7 @@
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Enjoyment'), h('span', { class: 'value' }, rating(P.fun)), h('span', { class: 'sub' }, `${P.fun.n} rated`)),
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Fair feedback'), h('span', { class: 'value' }, rating(P.fair)), h('span', { class: 'sub' }, `${P.fair.n} rated`)),
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Team score'), h('span', { class: 'value' }, isFinite(P.median) ? Math.round(P.median) : '–'), h('span', { class: 'sub' }, isFinite(P.median) ? `median · middle half ${Math.round(P.q1)}–${Math.round(P.q3)} · range ${Math.round(P.min)}–${Math.round(P.max)}` : '')),
-      P.twists.total ? h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Teammate twists handled'), h('span', { class: 'value' }, `${P.twists.met} of ${P.twists.total}`), h('span', { class: 'sub' }, 'quiet teammates drawn out, wrong claims checked')) : '');
+      P.twists.total ? h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Teammate twists handled'), h('span', { class: 'value' }, `${P.twists.met} of ${P.twists.total}`), h('span', { class: 'sub' }, 'quiet teammates drawn out, wrong claims questioned')) : '');
     const hist = h('div', { role: 'img', 'aria-label': 'Team scores of ' + P.scored + ' people in bands of 10 points: ' + P.bins.map(b => `${b.lo}–${b.hi}: ${b.n}`).join(', ') },
       h('div', { class: 'pilot-hist' }, P.bins.map(b => h('div', { class: 'bin' }, b.n ? String(b.n) : '', h('i', { style: { height: Math.round(72 * b.n / big) + 'px' } })))),
       h('div', { class: 'pilot-hist-axis', 'aria-hidden': 'true' }, P.bins.map(b => h('span', {}, b.lo === 90 ? '90+' : String(b.lo)))));
@@ -1650,7 +1650,7 @@
         h('h3', {}, 'What you did, specifically'),
         obsLists(N.strengths, N.tips, 'What you did well', 'Try next time'),
         N.challenges.length ? [h('h3', {}, 'Teammates who made it harder'),
-          h('ul', { class: 'twists' }, N.challenges.map(c => h('li', {}, h('span', { class: 'pill ' + (c.met ? 'pos' : 'neg') }, h('span', { class: 'dot' }), c.met ? 'Handled' : 'Missed'), h('span', {}, h('span', { class: 'obs-where' }, c.puzzle + ': '), twistText(c))))),
+          h('ul', { class: 'twists' }, N.challenges.map(c => h('li', {}, h('span', { class: 'pill' + (c.met ? ' pos' : c.kept ? '' : ' neg') }, h('span', { class: 'dot' }), c.met ? 'Handled' : c.kept ? 'Partly' : 'Missed'), h('span', {}, h('span', { class: 'obs-where' }, c.puzzle + ': '), twistText(c))))),
           h('p', { class: 'small muted' }, 'As in real teams, some teammates hold back and some are surer than they should be. Drawing out a quiet teammate and checking a confident claim are leadership moves too, beyond asking the right questions.')] : '',
         h('h3', {}, 'Where your points went'),
         pointsSplit({ actual: N.teamScore, use: N.use, hidden: N.hidden }),
@@ -1767,7 +1767,9 @@
   function twistText(c) {
     const nm = folName(c.fid);
     if (c.kind === 'quiet') return c.met ? `${nm} held back when you wrote to everyone, and you drew ${nm} out.` : `${nm} held back when you wrote to everyone, and ${nm}'s decisive reports stayed hidden.`;
-    return c.met ? `${nm} claimed a report rules out an option that it doesn't, and you checked instead of taking it on trust.` : `${nm} claimed a report rules out an option that it doesn't, and you took it on trust.`;
+    return c.met ? `${nm} claimed a report rules out an option that it doesn't, and you questioned the claim instead of taking it on trust.`
+      : c.kept ? `${nm} claimed a report rules out an option that it doesn't. You kept that option among the possibilities, but the chat doesn't show you questioning the claim.`
+      : `${nm} claimed a report rules out an option that it doesn't, and you ruled it out.`;
   }
 
   /* ================= boot ================= */
