@@ -1,7 +1,8 @@
 /* Manager Effect Lab — reads one puzzle's chat and answer and turns them into specific feedback:
  * which questions were specific or repeated, where the leader built on a teammate's answer, which
- * decisive reports never came up and who held them, and how many points were lost to hidden reports
- * versus to how the leader used the reports they had.
+ * decisive reports never came up and who held them, whether the leader gave teammates the case facts
+ * they needed to judge their own reports, and how many points were lost to hidden reports versus to
+ * how the leader used the reports they had.
  * Pure functions with no DOM, so the same code runs in the browser and in the Node tests.
  * These are rough rules for these puzzles, not a validated coding scheme. */
 (function (root) {
@@ -63,6 +64,14 @@
     if (/\b(question|q)\s*#?\s*(1|one)\b|\bfirst question\b/.test(t)) return 0;
     if (/\b(question|q)\s*#?\s*(2|two)\b|\bsecond question\b/.test(t)) return 1;
     return null;
+  }
+  /** Case facts (leader only) that a text passes on: [{ q, i }], matched on each fact's key words. */
+  function factMentions(p, text) {
+    const toks = new Set(tokens(text).concat(words(text).filter(w => /^\d+$/.test(w) && +w > 20))), out = [];
+    p.questions.forEach((q, qi) => (q.facts || []).forEach((f, i) => {
+      if (f.keys.some(k => toks.has(/^\d+$/.test(k) ? k : stem(k)))) out.push({ q: qi, i });
+    }));
+    return out;
   }
   const sentences = text => String(text).split(/(?<=[?!.])\s+|\n+/).map(s => s.trim()).filter(Boolean);
   const LEAD = new RegExp('^(?:(?:ok|okay|so|and|also|great|thanks|thank you|cool|right|now|then|next|first|hi|hey|hello|guys|team|all|everyone|folks|quick question|one more|last|finally|btw|over to you|go ahead and|' + NAMES.join('|') + ')\\b[\\s,!:;.\\-–—]*)+', 'i');
@@ -170,8 +179,9 @@
   const OFFER = /\b(i have|i've got|i got|there's|there is|i also have)\s+(more|another|one more|something else|other|a couple more)|\bmore (on|about) (this|that|it)\b|\bif you (want|need) (it|them|more)\b|\bmore where that came from\b|\bask (me )?if you need\b/i;
   const MORE_REQ = /\b(more|else|rest|other|another|yes|go ahead|sure|send (it|them)|keep going|go on|continue|carry on|next)\b/i;
   const REPEAT_ADVICE = 'Asking again makes teammates recite their reports a couple at a time, relevant or not; asking about the options still standing gets the decisive ones sooner.';
-  // Every decisive report out within this many requests counts as efficient (one per teammate).
-  const EFFICIENT_ASKS = FOL.length;
+  // Every decisive report out within this many requests counts as efficient: passing on the case facts takes one,
+  // asking about each question's options two. Collecting every report two at a time takes three or more.
+  const EFFICIENT_ASKS = 2;
   const NUM = ['no', 'one', 'two', 'three', 'four', 'five', 'six'];
 
   /**
@@ -189,7 +199,9 @@
     const leaderMsgs = [], qList = [], heard = [], leaderToks = new Set();
     const surfaced = new Map(), offers = new Map(), lastTo = {};
     const askedAny = new Set(), askedDirect = new Set(), askedAbout = {};
+    const context = new Map();   // case facts passed on to teammates: 'q:i' -> first leader message index
     let turns = 0, asksToAll = null;   // requests the leader had sent when the last decisive report came out
+    let pendingAsk = new Set();        // teammates whose latest message asked the leader something
     messages.forEach((m, i) => {
       if (i && (m.from === 'leader') !== (messages[i - 1].from === 'leader')) turns++;
       if (m.from === 'leader') {
@@ -206,7 +218,11 @@
           if (!v.optionKeys.has(t)) picked.push(src);
           else if (direct && aud.some(a => src.has(a))) picked.push(new Set(aud));
         });
-        let followUp = picked.length > 0;
+        // passing on case facts lets teammates judge their own reports; answering a teammate's question is back-and-forth too
+        const facts = factMentions(p, m.text).filter(f => !context.has(f.q + ':' + f.i));
+        facts.forEach(f => context.set(f.q + ':' + f.i, leaderMsgs.length));
+        let followUp = picked.length > 0 || (aud.some(a => pendingAsk.has(a)) && (facts.length > 0 || toks.some(t => v.specific.has(t))));
+        aud.forEach(a => pendingAsk.delete(a));
         const connect = picked.some(src => aud.some(a => !src.has(a)));
         aud.forEach(fid => {
           if (!offers.has(fid)) return;
@@ -229,7 +245,7 @@
           if (direct) askedDirect.add(fid);
           optionMentions(p, m.text).forEach(o => { (askedAbout[fid] = askedAbout[fid] || new Set()).add(o.q + ':' + o.k); });
         });
-        const lm = { i, m, aud, direct, qs, followUp, connect, credited: [] };
+        const lm = { i, m, aud, direct, qs, followUp, connect, facts, credited: [] };
         leaderMsgs.push(lm);
         aud.forEach(fid => { lastTo[fid] = lm; });
         toks.forEach(t => leaderToks.add(t));
@@ -244,6 +260,7 @@
           }
         });
         heard.push({ fid: m.from, toks: new Set(tokens(m.text)), nums: new Set(nums) });
+        if (m.text.includes('?')) pendingAsk.add(m.from); else pendingAsk.delete(m.from);
         if (OFFER.test(m.text)) offers.set(m.from, i);
       }
     });
@@ -254,6 +271,9 @@
     const we = (leaderText.match(/\b(we|us|our|ours|ourselves|let's|lets)\b/gi) || []).length;
     const repeats = qList.filter(q => q.repeat), targeted = qList.filter(q => !q.repeat && q.targeted), generic = qList.filter(q => !q.repeat && !q.targeted);
     const missed = critical.filter(c => !surfaced.has(c.num));
+    // the case facts behind the teammates' decisive reports, and how many of them the leader passed on
+    const neededFacts = new Set(critical.map(c => c.q + ':' + c.fact));
+    const factsShared = [...neededFacts].filter(k => context.has(k)).length;
     const metrics = {
       leaderMessages: L.length, words: nWords, questions: qList.length, turns, weRate: nWords ? 100 * we / nWords : 0,
       engaged: new Set(messages.filter(m => m.from !== 'leader').map(m => m.from)).size,
@@ -261,7 +281,8 @@
       targeted: targeted.length, generic: generic.length, repeats: repeats.length,
       followUps: leaderMsgs.filter(x => x.followUp).length, connects: leaderMsgs.filter(x => x.connect).length,
       askedDirect: FOL.map(f => f.id).filter(id => askedDirect.has(id)), askedAny: FOL.map(f => f.id).filter(id => askedAny.has(id)),
-      offersIgnored: [...offers.keys()], surfacedNums: [...surfaced.keys()], missedNums: missed.map(c => c.num), asksToAll
+      offersIgnored: [...offers.keys()], surfacedNums: [...surfaced.keys()], missedNums: missed.map(c => c.num), asksToAll,
+      factsShared, factsNeeded: neededFacts.size, contextShared: context.size > 0
     };
 
     /* where the points went: hidden reports vs using the reports the leader had */
@@ -304,6 +325,13 @@
         good('all-surfaced', quick ? 7 : 6, quick
           ? `Every decisive report your teammates held came out after just ${asksToAll === 1 ? 'one request' : NUM[asksToAll] + ' requests'} from you. Efficient: there was nothing left to ask.`
           : 'Every decisive report your teammates held came out.');
+      }
+      const ctxMsg = leaderMsgs.find(x => x.facts.length);
+      if (ctxMsg) good('context', 3 + 2 * factsShared / Math.max(1, neededFacts.size) + (missed.length ? 0 : 2), `You told your teammates what the case file says, for example “${quote(ctxMsg.m.text, 80)}”. Only you had the case file, so that let them judge which of their reports rule an option out.`);
+      const fact = critical.filter(c => !context.has(c.q + ':' + c.fact)).map(c => p.questions[c.q].facts[c.fact].text)[0];
+      if (!context.size && missed.length) tip('no-context', 5 + missed.length, `Your teammates couldn't tell which of their reports mattered: a report rules an option out only against the case file, and only you had it. Telling them a case fact, such as “${quote(fact, 70)}”, lets them pick out the reports that clash with it.`);
+      else if (!missed.length && critical.length && !(asksToAll >= 1 && asksToAll <= EFFICIENT_ASKS) && fact && context.size < neededFacts.size) {
+        tip('slow', 3, `Getting every decisive report took ${asksToAll ? (NUM[asksToAll] || asksToAll) + ' requests' : 'many messages'}, because your teammates couldn't tell which of their reports mattered and recited them a couple at a time. Telling them the case facts, such as “${quote(fact, 70)}”, lets them pick out the decisive ones in one go.`);
       }
       const conn = leaderMsgs.find(x => x.connect);
       if (conn) good('connect', 3 + metrics.connects, `You passed on what one teammate said to the others${metrics.connects > 1 ? ` ${metrics.connects} times` : ''}, for example “${quote(conn.m.text, 80)}”. Passing reports on lets the others check them against their own.`);
@@ -402,7 +430,8 @@
       hidden: allQ.length ? S.mean(allQ.map(x => x.hidden)) : NaN, use: allQ.length ? S.mean(allQ.map(x => x.use)) : NaN,
       allAsked: team.filter(r => r.analysis.metrics.askedDirect.length === FOL.length).length,
       allSurfaced: team.filter(r => r.analysis.metrics.critical && r.analysis.metrics.surfaced === r.analysis.metrics.critical).length,
-      quickPuzzles: team.filter(r => quickDone(r.analysis.metrics)).length, puzzles: n
+      quickPuzzles: team.filter(r => quickDone(r.analysis.metrics)).length, puzzles: n,
+      contextPuzzles: team.filter(r => r.analysis.metrics.contextShared).length
     };
     const quickMax = Math.max(0, ...team.filter(r => quickDone(r.analysis.metrics)).map(r => r.analysis.metrics.asksToAll));
     // strongest instance of each kind of observation, labelled with its puzzle
@@ -428,8 +457,10 @@
       }
       if (o.key === 'all-asked') { o.text = `You asked all three teammates directly in ${totals.allAsked} of ${n} team puzzles.`; o.weight = 1 + totals.allAsked; o.puzzle = null; }
       if (o.key === 'connect' && totals.connectsTotal > 1) o.weight += totals.connectsTotal;
+      if (o.key === 'context' && totals.contextPuzzles > 1) { o.text = `You told your teammates what the case file says in ${totals.contextPuzzles === n ? (n === 2 ? 'both' : 'all ' + n) : totals.contextPuzzles + ' of ' + n} team puzzles, so they could judge which of their reports rule an option out.`; o.weight += totals.contextPuzzles; o.puzzle = null; }
     });
     tips.forEach(o => {
+      if (o.key === 'no-context' && o.count > 1) { o.text = `In ${o.count} team puzzles you didn't tell your teammates what the case file says. Only you had it, so they couldn't tell which of their reports rule an option out. Passing on the case facts lets them pick out the decisive ones.`; o.puzzle = null; }
       if (o.key === 'repeats' && o.count > 1) { o.text = `Across the test, ${totals.repeatsTotal} of your questions repeated an earlier one, such as “${o.example}”. ${REPEAT_ADVICE}`; o.puzzle = null; }
     });
     const pick = (xs, k) => xs.sort((a, b) => b.weight - a.weight).slice(0, k);
@@ -442,13 +473,15 @@
   /**
    * The three habits, rated strong / some / little on rough thresholds for these puzzles (3–6 decisive hidden
    * clues each), not norms. Specific questions count fully, general ones half and repeats not at all, so asking
-   * the same thing again earns nothing. When every decisive clue came out, fewer questions or follow-ups were
-   * enough: those rate 'efficient' rather than 'some' or 'little'. T: totals from summarise().
+   * the same thing again earns nothing. When every decisive clue came out within a couple of requests in every
+   * puzzle, fewer questions or follow-ups were enough: those rate 'efficient' rather than 'some' or 'little'.
+   * Collecting everything with many general requests does not. T: totals from summarise().
    */
   function habits(T) {
     const rate = (v, strong, some) => (!isFinite(v) ? 'little' : v >= strong ? 'strong' : v >= some ? 'some' : 'little');
     const complete = T.critical > 0 && T.surfaced === T.critical;
-    const enough = r => (complete && r !== 'strong' ? 'efficient' : r), ENOUGH = ' You drew out every decisive clue, so fewer was enough.';
+    const quick = complete && T.quickPuzzles === T.puzzles;
+    const enough = r => (quick && r !== 'strong' ? 'efficient' : r), ENOUGH = ' You drew out every decisive clue within a couple of requests, so fewer was enough.';
     const ask = enough(rate(T.targeted + 0.5 * T.generic, 4, 2)), back = enough(rate(T.followUps, 2, 1));
     return [
       { label: 'Asking questions', value: `${fmt1(T.targeted + T.generic)} per puzzle, ${pctText(T.targetedShare)} specific`, rating: ask, note: 'Leaders who asked more questions got better results, with AI and with human teams. Specific questions count fully here, general ones half, repeats not at all.' + (ask === 'efficient' ? ENOUGH : '') },
@@ -456,20 +489,33 @@
       { label: 'Drawing out hidden clues', value: `${T.surfaced} of ${T.critical} decisive clues`, rating: rate(T.critical ? T.surfaced / T.critical : NaN, 0.75, 0.4), note: 'Weak leaders learned little from their team: their answers looked like uninformed guesses.' }
     ];
   }
-  /** A playful leadership style from the habits: { name, text }. */
+  /** A playful leadership style from the habits: { name, text }. Every claim in the text rests on behaviour seen in the chat. */
   function leaderStyle(hb, T) {
     const [q, t, i] = hb.map(x => x.rating), general = !(T.targetedShare >= 0.35);
     const complete = T.critical > 0 && T.surfaced === T.critical;
-    if (i === 'strong' && (q === 'strong' || t === 'strong') && !general) return { name: 'The Facilitator', text: 'You asked specific questions, built on the answers and pulled out what each teammate knew. That is the pattern Study 2 linked to the most effective leaders.' };
+    const briefed = T.contextPuzzles > 0 && T.contextPuzzles >= T.puzzles / 2;
+    const quick = T.quickPuzzles === T.puzzles;
+    if (i === 'strong' && (q === 'strong' || t === 'strong') && !general) {
+      const did = ['asked specific questions'];
+      if (T.followUps >= 0.5) did.push('built on your teammates\' answers');
+      if (briefed) did.push('told the team what the case file says');
+      did.push('drew out what each teammate knew');
+      return { name: 'The Facilitator', text: 'You ' + listText(did) + '. ' + (T.followUps >= 0.5
+        ? 'That is the pattern Study 2 linked to the most effective leaders.'
+        : 'Study 2 linked asking questions like this, and the back-and-forth that follows, to the most effective leaders.') };
+    }
+    if (i === 'strong' && complete && briefed) return { name: 'The Briefer', text: 'You told your teammates what the case file says, so they could pick out the reports that mattered themselves, and every hidden clue came out' +
+      (quick ? ' after only a few requests. Efficient: sharing context saved asking for everything.' : '.') };
     if (i === 'strong' && complete) return { name: 'The Collector', text: (general ? 'You drew out every hidden clue by asking the team broadly.' : 'You drew out every hidden clue with well-aimed questions.') +
-      (T.quickPuzzles === T.puzzles ? ' It took only a few requests: efficient, with nothing left to ask.' : ' That is the heart of leading a hidden-profile team.') };
-    if (i === 'strong') return { name: 'The Collector', text: general ? 'You got most of the hidden clues out by asking for everything at once. For the last few, ask about the options still standing.' : 'You got most of the hidden clues out with few questions. Building on what teammates say would surface the rest.' };
-    if (T.repeats >= 1.5) return { name: 'The Broadcaster', text: 'You asked the team for everything, often more than once. Teammates share a couple of reports at a time, so specific follow-ups would have drawn out more.' };
-    if (q === 'strong' || t === 'strong') return { name: 'The Explorer', text: 'You kept the conversation going, but some decisive clues stayed hidden. Ask each teammate directly about the options still standing.' };
+      (quick ? ' It took only a few requests: efficient, with nothing left to ask.' : ' Your teammates could not tell which of their reports mattered, so it took a while; telling them what the case file says lets them find the decisive ones themselves.') };
+    if (i === 'strong') return { name: 'The Collector', text: general ? 'You got most of the hidden clues out by asking for everything at once. For the last few, ask about the options still standing or share the case facts.' : 'You got most of the hidden clues out with few questions. Building on what teammates say would surface the rest.' };
+    if (T.repeats >= 1.5) return { name: 'The Broadcaster', text: 'You asked the team for everything, often more than once. Teammates share a couple of reports at a time and can\'t tell which matter without the case facts, so specific questions or sharing what you know would have drawn out more.' };
+    if (q === 'strong' || t === 'strong') return { name: 'The Explorer', text: (q === 'strong' ? 'You asked plenty of questions' : 'You kept the conversation going') + ', but some decisive clues stayed hidden. Ask each teammate directly about the options still standing, or tell them the case facts.' };
+    if (i === 'little' && q === 'little' && T.questions >= 0.5) return { name: 'The Delegator', text: 'You handed the team a broad request, but few decisive clues came back. Your teammates could not tell which of their reports mattered without the case facts, so ask about the options or tell them what the case file says.' };
     if (i === 'little' && q === 'little') return { name: 'The Lone Solver', text: 'You leaned on your own clues. Most decisive clues sat with your teammates, so draw them out before you decide.' };
-    return { name: 'The Coordinator', text: 'You kept the team moving and got part of the picture. A few more follow-up questions would surface the rest.' };
+    return { name: 'The Coordinator', text: 'You kept the team moving and got part of the picture. A few more follow-up questions, or telling the team what the case file says, would surface the rest.' };
   }
 
-  root.MEL_COACH = { tokens, words, vocab, optionMentions, reportNums, questionMention, sentences, isQuestion, vocatives, audienceOf, ruledOut, bestWith, analyse, top, summarise, habits, leaderStyle };
+  root.MEL_COACH = { tokens, words, vocab, optionMentions, reportNums, questionMention, factMentions, sentences, isQuestion, vocatives, audienceOf, ruledOut, bestWith, analyse, top, summarise, habits, leaderStyle };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.MEL_COACH;
 })(typeof window !== 'undefined' ? window : globalThis);

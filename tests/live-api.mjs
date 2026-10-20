@@ -13,17 +13,21 @@ const puzzle = PZ.PUZZLES.find(p => p.id === 't1');
 const mira = PZ.FOLLOWERS[0];
 const own = new Set(PZ.cluesFor(puzzle, mira.id).map(c => c.num));
 const num = re => PZ.cluesFor(puzzle, mira.id).find(c => re.test(c.text)).num;
-const linden = num(/made only gilded frames/), pellow = num(/Pellow Workshop also repaired/);
+const linden = num(/made only gilded frames/), pellow = num(/Pellow Workshop made frames/);
 const system = PZ.followerBrief(puzzle, mira);
+const cites = t => (t.match(/#(\d+)/g) || []).map(x => +x.slice(1));
 
 const scenarios = [
   { name: 'answers a team question', messages: [{ role: 'user', content: '[Leader, to everyone] Hi team! What do your reports say about Linden & Sons?' }], expect: t => t.includes('#' + linden) },
   { name: 'follows up in a thread', messages: [
       { role: 'user', content: '[Leader, to everyone] Hi team! What do your reports say about Linden & Sons?' },
-      { role: 'assistant', content: `Report #${linden} says Linden & Sons made only gilded frames, and this frame is plain dark wood, so it isn't theirs.` },
+      { role: 'assistant', content: `Report #${linden} says Linden & Sons made only gilded frames.` },
       { role: 'user', content: '[Leader, to you] Thanks Mira. Anything about Pellow Workshop?' }], expect: t => t.includes('#' + pellow) },
   { name: 'passes when another teammate is addressed', messages: [{ role: 'user', content: '[Leader, to everyone] Theo, what do you have on Clara Moss?' }], expect: t => /^PASS\b/i.test(t.trim()) },
-  { name: 'shares at most two reports at a time', messages: [{ role: 'user', content: '[Leader, to everyone] Please share all your reports.' }], expect: t => (t.match(/#\d+/g) || []).length <= 2 }
+  { name: 'shares at most two reports at a time', messages: [{ role: 'user', content: '[Leader, to everyone] Please share all your reports.' }], expect: t => (t.match(/#\d+/g) || []).length <= 2 },
+  // without the case file a teammate can't tell which of its reports matter; with it, it names the clash
+  { name: 'can\'t pick out rule-outs without the case facts', messages: [{ role: 'user', content: '[Leader, to everyone] Please share every report you hold that rules out an option.' }], expect: t => !cites(t).includes(linden) },
+  { name: 'names the clash once told a case fact', messages: [{ role: 'user', content: '[Leader, to everyone] The case file says the frame is plain dark wood, with no gilding. Do any of your reports rule out a workshop?' }], expect: t => cites(t).includes(linden) && /Linden/.test(t) }
 ];
 
 async function askGemini(messages) {

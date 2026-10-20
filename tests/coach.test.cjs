@@ -12,10 +12,11 @@ function check(name, fn) {
 }
 const t1 = PZ.PUZZLES.find(p => p.id === 't1'), t3 = PZ.PUZZLES.find(p => p.id === 't3'), s1 = PZ.PUZZLES.find(p => p.id === 's1');
 const num = (p, re) => p.clues.find(c => re.test(c.text)).num;
-// t1: Mira holds the Linden & Sons rule-out and the only report on Dario Ricci; Theo the Bruno Keller rule-out;
-// Jonas the Elin Berg (pigment) rule-out. In t3 the leader's own report rules out Clean Rivers Trust.
-const LINDEN = num(t1, /made only gilded frames/), DARIO = num(t1, /Dario Ricci taught/), PANELS = num(t1, /only on wooden panels/);
-const PIGMENT = num(t1, /blue pigment/), CLEAN = num(t3, /donation last year/);
+// t1: Mira holds the Linden & Sons rule-out and a report on Dario Ricci; Theo the Bruno Keller rule-out;
+// Jonas the Elin Berg rule-out (against the pigment case fact). In t3 the leader's own report rules out Clean Rivers Trust.
+const LINDEN = num(t1, /made only gilded frames/), DARIO = num(t1, /Dario Ricci painted on canvas/), PANELS = num(t1, /only on wooden panels/);
+const PIGMENT = num(t1, /died in 1948/), CLEAN = num(t3, /donation last year/);
+const caseFile = p => 'Here is what the case file says. ' + p.questions.map(q => q.facts.map(f => f.text).join(' ')).join(' ');
 
 /** Play a chat with the scripted teammates: each leader message gets replies from everyone it reaches. */
 function play(p, script) {
@@ -30,6 +31,12 @@ function play(p, script) {
   return messages;
 }
 const even = [[20, 20, 20, 20, 20], [20, 20, 20, 20, 20]];
+/** The best answer possible with the leader's own and shared reports plus those the teammates cited. */
+function bestAnswer(p, msgs) {
+  const avail = new Set(p.clues.filter(c => c.holder === 'leader' || c.holder === 'public').map(c => c.num));
+  msgs.filter(m => m.from !== 'leader').forEach(m => C.reportNums(m.text).forEach(n => avail.add(n)));
+  return p.questions.map((q, qi) => { const out = C.ruledOut(p, qi, avail); const left = [0, 1, 2, 3, 4].filter(k => !out.has(k)); const a = [0, 0, 0, 0, 0]; left.forEach((k, i) => { a[k] = Math.floor(100 / left.length) + (i < 100 % left.length ? 1 : 0); }); return a; });
+}
 
 check('questions are found with or without a question mark', () => {
   assert(C.isQuestion('Mira, anything on operator error'));
@@ -49,12 +56,13 @@ check('questions are found with or without a question mark', () => {
     .forEach(s => assert(!C.isQuestion(s), s));
 });
 
-check('requests worded as instructions count, so drawing everything out that way is efficient, not "no questions"', () => {
+check('requests worded as instructions count, so collecting everything that way is not "no questions"', () => {
   [['Everyone, post your reports.', 'Keep going.'], ['Dump everything you have here.', 'More please.'], ['Reports please!', 'Next ones please']].forEach(lines => {
-    const a = C.analyse(t1, play(t1, lines.map(text => ['all', text])), even);
+    // each teammate holds 8 reports and passes on two at a time: four requests to collect everything
+    const a = C.analyse(t1, play(t1, lines.concat([lines[1], lines[1]]).map(text => ['all', text])), even);
     assert.strictEqual(a.metrics.surfaced, a.metrics.critical, lines[0] + ': surfaced ' + a.metrics.surfaced);
-    assert.strictEqual(a.metrics.questions, 2, lines[0]);
-    assert.strictEqual(a.metrics.asksToAll, 2, lines[0]);
+    assert.strictEqual(a.metrics.questions, 4, lines[0]);
+    assert(a.metrics.asksToAll >= 3 && a.metrics.asksToAll <= 4, lines[0] + ' asksToAll ' + a.metrics.asksToAll);
     const keys = a.observations.map(o => o.key);
     assert(!keys.includes('no-questions') && keys.includes('all-surfaced'), keys.join(','));
   });
@@ -77,27 +85,70 @@ check('repeated general requests earn no extra credit and are named in the feedb
   assert(keys.includes('repeats') && keys.includes('generic'), keys.join(','));
 });
 
-check('broad requests that draw out every decisive report are praised as efficient, not second-guessed', () => {
-  const results = [t1, t3].map(p => {
-    const msgs = play(p, [['all', 'Please share all your reports.'], ['all', 'Please share all your reports.']]);
+check('one broad request for "every report that rules out an option" no longer draws out the puzzle', () => {
+  [t1, t3].forEach(p => {
+    const msgs = play(p, [['all', 'Please share every report you hold that rules out an option.']]);
     const a = C.analyse(p, msgs, even);
-    assert.strictEqual(a.metrics.surfaced, a.metrics.critical, p.id + ': two broad requests draw out everything from the scripted teammates');
-    assert.strictEqual(a.metrics.asksToAll, 2, p.id + ' asksToAll ' + a.metrics.asksToAll);
+    assert.strictEqual(a.metrics.surfaced, 0, p.id + ': teammates without the case file cannot tell which reports matter');
+    assert(msgs.filter(m => m.from !== 'leader').every(m => /case/i.test(m.text)), 'teammates say they need the case details');
+    assert(a.observations.some(o => o.key === 'no-context'), a.observations.map(o => o.key).join(','));
+  });
+});
+
+check('sharing the case facts draws out every decisive report in one request and is praised as efficient, not second-guessed', () => {
+  const results = [t1, t3].map(p => {
+    const msgs = play(p, [['all', caseFile(p) + ' Which of your reports rule out an option?']]);
+    const a = C.analyse(p, msgs, even);
+    assert.strictEqual(a.metrics.surfaced, a.metrics.critical, p.id + ': the case facts let every teammate pick out its decisive reports');
+    assert.strictEqual(a.metrics.asksToAll, 1, p.id + ' asksToAll ' + a.metrics.asksToAll);
+    assert.strictEqual(a.metrics.factsShared, a.metrics.factsNeeded);
     const all = a.observations.find(o => o.key === 'all-surfaced');
-    assert(all && /after just two requests/.test(all.text) && /Efficient/.test(all.text), all && all.text);
-    assert(!a.observations.some(o => ['generic', 'repeats', 'missed', 'offer', 'early'].includes(o.key)), a.observations.map(o => o.key).join(','));
+    assert(all && /after just one request/.test(all.text) && /Efficient/.test(all.text), all && all.text);
+    assert(a.observations.some(o => o.key === 'context'));
+    assert(!a.observations.some(o => ['generic', 'repeats', 'missed', 'offer', 'early', 'no-context', 'slow'].includes(o.key)), a.observations.map(o => o.key).join(','));
     return { title: p.title, solo: false, analysis: a };
   });
   const S = C.summarise(results), hb = C.habits(S.totals), style = C.leaderStyle(hb, S.totals);
-  assert(/both team puzzles, each time after at most two requests/.test(S.strengths.find(o => o.key === 'all-surfaced').text), S.strengths.map(o => o.text).join(' | '));
-  assert(!S.tips.some(o => ['generic', 'repeats'].includes(o.key)), S.tips.map(o => o.key).join(','));
+  assert(/both team puzzles, each time after at most one request/.test(S.strengths.find(o => o.key === 'all-surfaced').text), S.strengths.map(o => o.text).join(' | '));
+  assert(S.strengths.some(o => o.key === 'context' && /both team puzzles/.test(o.text)), S.strengths.map(o => o.text).join(' | '));
+  assert(!S.tips.some(o => ['generic', 'repeats', 'no-context', 'slow'].includes(o.key)), S.tips.map(o => o.key).join(','));
   assert.deepStrictEqual(hb.map(x => x.rating), ['efficient', 'efficient', 'strong']);
   const said = [style.text].concat(S.tips.map(o => o.text), hb.map(x => x.note)).join(' ');
   assert(!/faster|sooner|quicker|would have|options still standing/i.test(said), said);
+  assert.strictEqual(style.name, 'The Briefer');
   assert(/efficient/i.test(style.text), style.text);
   // with something still hidden, the advice to ask about the options still standing returns
   const part = C.habits(Object.assign({}, S.totals, { surfaced: S.totals.critical - 1 }));
   assert(part.slice(0, 2).every(x => x.rating !== 'efficient'), part.map(x => x.rating).join(','));
+});
+
+check('collecting everything without the case facts works but takes longer, and the feedback says so', () => {
+  const results = [t1, t3].map(p => {
+    const a = C.analyse(p, play(p, [['all', 'Please share all your reports.'], ['all', 'Keep going.'], ['all', 'Keep going.'], ['all', 'Keep going.']]), even);
+    assert.strictEqual(a.metrics.surfaced, a.metrics.critical, p.id);
+    const slow = a.observations.find(o => o.key === 'slow');
+    assert(slow && /case facts/.test(slow.text), a.observations.map(o => o.key).join(','));
+    return { title: p.title, solo: false, analysis: a };
+  });
+  const S = C.summarise(results), style = C.leaderStyle(C.habits(S.totals), S.totals);
+  assert.strictEqual(style.name, 'The Collector');
+  assert(!/nothing left to ask/.test(style.text) && /case file/.test(style.text), style.text);
+});
+
+check('the leadership style claims only what the chat shows', () => {
+  const T = { critical: 9, surfaced: 9, targetedShare: 1, followUps: 0, contextPuzzles: 0, quickPuzzles: 2, puzzles: 2, repeats: 0, questions: 5 };
+  const hb = r => r.map(rating => ({ rating }));
+  // asked specific questions but never followed up: no claim about building on answers
+  const noFollow = C.leaderStyle(hb(['strong', 'efficient', 'strong']), T);
+  assert.strictEqual(noFollow.name, 'The Facilitator');
+  assert(!/built on/.test(noFollow.text), noFollow.text);
+  const withFollow = C.leaderStyle(hb(['strong', 'strong', 'strong']), Object.assign({}, T, { followUps: 2 }));
+  assert(/built on your teammates' answers/.test(withFollow.text), withFollow.text);
+  // asked, but little came back: not "you leaned on your own clues"
+  const asked = C.leaderStyle(hb(['little', 'little', 'little']), Object.assign({}, T, { surfaced: 0, questions: 1 }));
+  assert.strictEqual(asked.name, 'The Delegator');
+  const silent = C.leaderStyle(hb(['little', 'little', 'little']), Object.assign({}, T, { surfaced: 0, questions: 0 }));
+  assert.strictEqual(silent.name, 'The Lone Solver');
 });
 
 check('a message to everyone that mentions a teammate is not a question to that teammate', () => {
@@ -147,7 +198,7 @@ check('the same general question to different people is not a repeat', () => {
 check('specific questions, follow-ups and connecting teammates are recognised', () => {
   const msgs = play(t1, [
     ['f2', 'Theo, what do you have on Bruno Keller?'],
-    ['f3', 'Jonas, Theo says the portrait is on canvas. Does that fit anything on the pigment?'],
+    ['f3', 'Jonas, Theo says Bruno Keller painted only on wooden panels. Anything on the blue pigment?'],
     ['all', 'Who has anything on Linden & Sons?']
   ]);
   const a = C.analyse(t1, msgs, even);
@@ -217,15 +268,23 @@ check('scripted teammates: addressing, topics, report numbers, more, views', () 
   assert(/#\d+/.test(r2), r2);
   for (let k = 0; k < 4; k++) { msgs.push({ from: 'f3', to: 'leader', text: SCR.reply(t1, 'f3', msgs, s) }); msgs.push({ from: 'leader', to: 'f3', text: 'Anything else?' }); }
   assert(/everything|nothing more/i.test(SCR.reply(t1, 'f3', msgs, s)));
-  assert(/rule out|ruled out|drop/i.test(SCR.reply(t1, 'f1', [{ from: 'leader', to: 'f1', text: 'Mira, what do you think about question 2?' }], sh())));
+  // a view or a rule-out needs the case facts
+  assert(/case/i.test(SCR.reply(t1, 'f1', [{ from: 'leader', to: 'f1', text: 'Mira, what do you think about question 2?' }], sh())));
+  assert(/case/i.test(SCR.reply(t1, 'f1', m('Which of your reports rule out an artist?'), sh())));
+  const told = [{ from: 'leader', to: 'f1', text: 'The frame is plain dark wood, with no gilding.' }], st = sh();
+  const clash = SCR.reply(t1, 'f1', told, st);
+  assert(clash.includes('#' + LINDEN) && /rules out Linden & Sons/.test(clash), clash);
+  told.push({ from: 'f1', to: 'leader', text: clash }, { from: 'leader', to: 'f1', text: 'Mira, what do you think about question 2?' });
+  assert(/rule out|ruled out|drop/i.test(SCR.reply(t1, 'f1', told, st)));
+  assert(/none|don't think/i.test(SCR.reply(t1, 'f2', [{ from: 'leader', to: 'f2', text: 'The portrait is 60 cm tall and 50 cm wide.' }], sh())), 'Theo has nothing that clashes with the size');
 });
 
 check('summary: specific strengths and tips across puzzles; repeating a request rates lower than asking well', () => {
   const good = [
-    { p: t1, script: [['all', 'Hi team, what do you have on question 1?'], ['f2', 'Theo, anything on Bruno Keller?'], ['f3', 'Jonas, anything on Elin Berg or the pigment?'], ['all', 'Anything on Linden & Sons, Oakley Brothers or Marlow Frames?']] },
-    { p: t3, script: [['all', 'Who has anything on Ashford Park or Brookside Park?'], ['f1', 'Mira, what about Elmwood Common?'], ['all', 'Anything on Youth Sports Fund, Animal Rescue League or Elder Care Network?']] }
+    { p: t1, script: [['all', 'Hi team, what do you have on question 1?'], ['f2', 'Theo, anything on Bruno Keller?'], ['f2', 'Theo, was that wooden panels only?'], ['f3', 'Jonas, anything on Elin Berg or the pigment?'], ['all', 'Anything on Linden & Sons, Oakley Brothers or Marlow Frames?']] },
+    { p: t3, script: [['all', 'Who has anything on Ashford Park or Brookside Park?'], ['f1', 'Mira, what about Elmwood Common?'], ['f1', 'Mira, does that apply to groups of runners too?'], ['all', 'Anything on Youth Sports Fund, Animal Rescue League or Elder Care Network?']] }
   ].map(x => ({ title: x.p.title, solo: false, analysis: C.analyse(x.p, play(x.p, x.script), even) }));
-  const spam = [t1, t3].map(p => ({ title: p.title, solo: false, analysis: C.analyse(p, play(p, [['f1', 'Share everything.'], ['f1', 'Share everything.'], ['f1', 'Share everything.']]), even) }));
+  const spam = [t1, t3].map(p => { const msgs = play(p, [['f1', 'Share everything.'], ['f1', 'Share everything.'], ['f1', 'Share everything.']]); return { title: p.title, solo: false, analysis: C.analyse(p, msgs, bestAnswer(p, msgs)) }; });
   const G = C.summarise(good), X = C.summarise(spam);
   assert(G.strengths.length >= 1 && X.tips.length >= 1);
   assert(X.tips.some(o => o.key === 'repeats') && /Across the test, 4 of your questions repeated/.test(X.tips.find(o => o.key === 'repeats').text), X.tips.map(o => o.text).join(' | '));

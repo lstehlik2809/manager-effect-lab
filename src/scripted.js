@@ -1,7 +1,9 @@
 /* Manager Effect Lab — scripted teammates: no API and no key. They read the leader's messages with
- * simple rules (who is addressed, options, report numbers, topics, requests for more or for a view)
- * and pass on their reports a couple at a time, as the LLM teammates are briefed to (followerBrief).
- * Each has a slightly different voice. Deterministic, so the Node tests can check them. */
+ * simple rules (who is addressed, options, report numbers, topics, case facts, requests for more or
+ * for a view) and pass on their reports a couple at a time, as the LLM teammates are briefed to
+ * (followerBrief). Like them, they can't tell which of their reports rule an option out until the
+ * leader tells them the case facts. Each has a slightly different voice. Deterministic, so the Node
+ * tests can check them. */
 (function (root) {
   'use strict';
   const PZ = root.MEL_PUZZLES || require('./puzzles.js');
@@ -14,7 +16,9 @@
       none: ['Nothing on that in my reports.', 'Nothing on that, sorry.', 'I have nothing on that.'],
       done: 'That is everything I have.', doneQ: 'That is all I have on that question.', doneTopic: 'That is all I have on that.',
       hi: 'Hi! Ready.', ok: ['OK.', 'Got it.', 'Noted.'], ack: 'Agreed.',
-      view: 'Going by my report #{n}, I would rule out {o}. Beyond that it is your call.', noView: 'My reports do not settle it. Your call.'
+      view: 'Going by my report #{n}, I would rule out {o}. Beyond that it is your call.', noView: 'My reports do not settle it. Your call.',
+      clash: 'Then #{n} rules out {o}: {t}', noClash: 'None of my reports clashes with that.',
+      needCase: 'I can\'t tell which of mine rule anything out without the case details. What does the case file say?'
     },
     f2: { // Theo: chatty
       share: ['Good question. Report #{n} says: {t}', 'Oh, I have one on that. #{n}: {t}', 'Yes! #{n}: {t}'],
@@ -22,7 +26,9 @@
       none: ['Hmm, nothing on that in my pile.', 'Sorry, nothing on that from me.', 'Nope, nothing on that here.'],
       done: 'I think I have shared everything now.', doneQ: 'That is all I have on that one.', doneTopic: 'That was my only one on that.',
       hi: 'Hey! Happy to help.', ok: ['Sure thing.', 'Will do.', 'Makes sense.'], ack: 'Sounds right to me.',
-      view: 'My report #{n} says we can drop {o}. The rest I can\'t judge from my side.', noView: 'Honestly, nothing in my reports settles it.'
+      view: 'My report #{n} says we can drop {o}. The rest I can\'t judge from my side.', noView: 'Honestly, nothing in my reports settles it.',
+      clash: 'Oh, that matters! Report #{n} rules out {o}: {t}', noClash: 'Hmm, none of mine clash with that.',
+      needCase: 'Honestly, I can\'t tell which ones matter without knowing more about the case. What do we know?'
     },
     f3: { // Jonas: careful
       share: ['I think #{n} is relevant: {t}', 'Report #{n}: {t}', 'Let me check... #{n}: {t}'],
@@ -30,13 +36,16 @@
       none: ['I don\'t see anything on that in my reports.', 'Nothing on that, as far as I can see.', 'I have nothing on that, I\'m afraid.'],
       done: 'I believe I have passed on everything.', doneQ: 'I have nothing more on that question.', doneTopic: 'I have nothing more on that, I think.',
       hi: 'Hello. Ready when you are.', ok: ['Understood.', 'OK, noted.', 'Right.'], ack: 'That matches what I have.',
-      view: 'Based on report #{n}, {o} looks ruled out. I\'m not sure about the others.', noView: 'I can\'t tell from my reports, sorry.'
+      view: 'Based on report #{n}, {o} looks ruled out. I\'m not sure about the others.', noView: 'I can\'t tell from my reports, sorry.',
+      clash: 'Given that, I think #{n} rules out {o}: {t}', noClash: 'I don\'t think any of my reports clashes with that.',
+      needCase: 'I\'m not sure. Whether a report rules something out depends on the case, and I haven\'t seen the case file.'
     }
   };
   const OPINION = /\b(what do you think|what'?s your (view|take|guess|opinion)|your (view|opinion|take|guess)|do you agree|which (one|option)s? (is|are|would|do|should)|should we|any (ideas|thoughts|hunches)|thoughts\b|best guess)/i;
   const MORE = /\b(anything else|any ?more|more|the rest|other reports?|another|what else|go ahead|yes,? please|send (it|them)|keep (going|them coming)|go on|carry on|continue|next (ones?|reports?|batch|few))\b/i;
   const ALL = /\b(all|every|everything|anything|what (do|did) you (have|know|got|see)|what have you got|your (reports?|clues?|info|information|notes)|share|send|list|tell (me|us))\b/i;
-  const GREET = /^\s*(hi|hello|hey|hiya|good (morning|afternoon|evening))\b/i;
+  const RULE = /\b(rul\w*\s+(?:\w+\s+)?out|exclud\w*|eliminat\w*|decisive|clash\w*)\b/i;
+  const GREET =/^\s*(hi|hello|hey|hiya|good (morning|afternoon|evening))\b/i;
   const THANKS = /^\s*(thanks|thank you|thx|great|perfect|ok|okay|got it|cool|nice|good|noted|understood|brilliant|super)\b/i;
   const pick = (x, n) => (Array.isArray(x) ? x[n % x.length] : x);
   const fill = (tpl, cl) => tpl.replace('{n}', cl.num).replace('{t}', cl.text);
@@ -56,7 +65,7 @@
     // addressed to someone else by name ("Theo, …"); merely mentioning Theo is still for everyone
     if (!direct && !C.audienceOf(latest).includes(fid)) return '';
     const text = incoming.map(m => m.text).join('\n');
-    const mine = PZ.cluesFor(p, fid).slice().sort((a, b) => (a.holder === 'public') - (b.holder === 'public'));
+    const mine = PZ.cluesFor(p, fid);   // by report number: a teammate doesn't know which of its reports the others also have
     const v = C.vocab(p);
     const topics = new Set(C.tokens(text).filter(t => v.specific.has(t)));
     const opts = C.optionMentions(p, text), nums = C.reportNums(text);
@@ -72,6 +81,26 @@
       return cls.map((cl, k) => (k ? 'Also #' + cl.num + ': ' + cl.text : fill(again ? V.again : pick(V.share, said), cl))).join(' ');
     };
     const freshFor = filter => mine.filter(cl => !shared.has(cl.num) && filter(cl));
+    const optName = cl => p.questions[cl.q].options[cl.rules[0]];
+
+    // case facts the leader has told this teammate, and which of its reports clash with them
+    const factKey = f => f.q + ':' + f.i;
+    const before = new Set(messages.slice(0, lastOwn + 1).filter(m => m.from === 'leader' && (m.to === 'all' || m.to === fid))
+      .flatMap(m => C.factMentions(p, m.text)).map(factKey));
+    const newFacts = C.factMentions(p, text).filter(f => !before.has(factKey(f)));
+    const known = new Set([...before, ...newFacts.map(factKey)]);
+    const clashes = mine.filter(cl => cl.kind === 'out' && known.has(cl.q + ':' + cl.fact));
+    const tellClashes = () => {
+      const fresh = clashes.filter(cl => !shared.has(cl.num)), now = fresh.slice(0, 2);
+      if (!now.length) return clashes.length ? V.doneTopic : V.noClash;
+      now.forEach(cl => shared.add(cl.num));
+      return now.map((cl, k) => (k ? `Also #${cl.num} rules out ${optName(cl)}: ${cl.text}` : V.clash.replace('{n}', cl.num).replace('{o}', optName(cl)).replace('{t}', cl.text))).join(' ') +
+        (fresh.length > 2 ? ' ' + V.more : '');
+    };
+    // 0. new case facts: check the reports against them. Asked which reports rule something out:
+    // without case facts there is no way to tell.
+    if (newFacts.length) return tellClashes();
+    if (RULE.test(text)) return known.size ? tellClashes() : V.needCase;
 
     // 1. report numbers
     if (nums.length) {
@@ -97,10 +126,10 @@
     }
     // 3. a view on the answer
     if (OPINION.test(text)) {
-      const outs = mine.filter(cl => cl.kind === 'out' && (qMention == null || cl.q === qMention));
-      if (!outs.length) return V.noView;
+      const outs = clashes.filter(cl => qMention == null || cl.q === qMention);
+      if (!outs.length) return known.size ? V.noView : V.needCase;
       shared.add(outs[0].num);
-      return V.view.replace('{n}', outs[0].num).replace('{o}', p.questions[outs[0].q].options[outs[0].rules[0]]);
+      return V.view.replace('{n}', outs[0].num).replace('{o}', optName(outs[0]));
     }
     // 4. greetings and thanks
     if (!asked && GREET.test(text)) return V.hi;

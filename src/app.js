@@ -819,13 +819,13 @@
         // on a phone the set-up panel is far down; offer the start right here (the resume box above does it for an unfinished test)
         pending ? '' : h('div', { class: 'btn-row hero-start' }, startBtn(), h('a', { href: '#ai-setup', class: 'small', onclick: e => { e.preventDefault(); $('#ai-setup').scrollIntoView({ behavior: 'smooth' }); } }, 'Choose length and teammates'),
           h('span', { class: 'small muted' }, `${len.label}, ${st.engine === 'hosted' ? 'live AI' : st.engine === 'scripted' ? 'scripted' : 'AI'} teammates` + (free ? ', no sign-up' : ''))),
-        h('p', { class: 'note' }, h('strong', {}, 'For fun, not a verdict. '), 'This version is inspired by the study, not a copy of it. Its puzzles are new, though each copies the structure of one of the study\'s own; the AI models are different, and Quick and Standard use fewer puzzles. It has not been validated, so your result describes how you led today\'s game, not how good a manager you are.')),
+        h('p', { class: 'note' }, h('strong', {}, 'For fun, not a verdict. '), 'This version is inspired by the study, not a copy of it. Its puzzles are new, though each copies the structure of one of the study\'s own, and here only you see the case facts that decide which reports matter; the AI models are different, and Quick and Standard use fewer puzzles. It has not been validated, so your result describes how you led today\'s game, not how good a manager you are.')),
       h('div', { class: 'grid-2' },
         setup,
         h('div', { class: 'panel prose' }, h('h3', {}, 'How it works'),
           h('ol', {},
-            h('li', {}, h('strong', {}, 'Lead the team. '), 'In each team puzzle you see 8 reports; each teammate holds 8 more, half of them shared. Message everyone or one person. Teammates only talk to you.'),
-            h('li', {}, h('strong', {}, 'Answer with probabilities. '), 'Each puzzle has two questions with five options. Each report either rules one option out or is irrelevant; the options left standing are equally likely. Spread 100 points across them.'),
+            h('li', {}, h('strong', {}, 'Lead the team. '), 'In each team puzzle you hold the case file and 8 reports; each teammate holds 8 more, half of them shared. Only you see the case file, so on their own your teammates can\'t tell which of their reports matter. Message everyone or one person. Teammates only talk to you.'),
+            h('li', {}, h('strong', {}, 'Answer with probabilities. '), 'Each puzzle has two questions with five options. Each report is a fact about one option, and it rules that option out when it clashes with the case file; the options left standing are equally likely. Spread 100 points across them.'),
             h('li', {}, h('strong', {}, 'Get feedback on what you did. '), 'After each puzzle: which questions drew out decisive reports, which reports stayed hidden and who held them, and where your points went.'),
             h('li', {}, h('strong', {}, 'See how you led. '), 'Your score, the leadership habits the study linked to better team results, a playful leadership style, and a result card to share.')),
           h('p', { class: 'small muted' }, 'Standard and Extended start with solo warm-ups, where you see every report; they show how you reason on your own. Scores run from 0 to 100 (100 = exactly the right distribution; an even split scores 20–80). Results stay in your browser. AI teammates receive only your chat messages; scripted teammates run entirely in your browser.'))),
@@ -1096,6 +1096,8 @@
       h('div', { class: 'eyebrow' }, p.solo ? 'Solo warm-up' : 'Team puzzle'),
       h('h3', {}, p.title), h('p', { class: 'small' }, p.scenario),
       h('ol', { class: 'small', style: { paddingLeft: '1.2em', margin: '0' } }, p.questions.map(q => h('li', {}, q.text))),
+      p.solo ? '' : h('h4', {}, 'Case file', h('span', { class: 'small muted' }, ' · only you')),
+      p.solo ? '' : h('div', { class: 'reports case-file' }, p.questions.flatMap((q, qi) => q.facts.map(f => h('div', { class: 'report case-fact' }, h('span', { class: 'q' }, 'Q' + (qi + 1)), f.text)))),
       h('h4', {}, p.solo ? 'All reports' : 'Your reports'), reports);
     const answers = h('div', { class: 'panel', id: 'answers' });
     const top = h('div', { class: 'ai-top' },
@@ -1109,7 +1111,7 @@
     if (!p.solo) {
       const msgs = $('#msgs');
       c.messages.forEach(m => msgs.append(msgEl(m)));
-      if (!c.messages.length) addSys(c.engine === 'scripted' ? 'Your scripted teammates are ready. They pick up names, options, report numbers and topics from your messages.' : 'Your teammates are online. Say hello, then start gathering information.');
+      if (!c.messages.length) addSys(c.engine === 'scripted' ? 'Your scripted teammates are ready. They pick up names, options, report numbers, topics and case facts from your messages.' : 'Your teammates are online. Say hello, then start gathering information.');
       if (c.locked) lockChat();
     }
   }
@@ -1447,7 +1449,8 @@
         h('div', { class: 'legend' }, h('span', {}, h('i', { class: 'bar', style: { background: 'var(--accent)' } }), 'Your answer'), h('span', {}, h('i', { class: 'bar', style: { background: 'var(--neutral)' } }), 'Correct')),
         h('ul', { class: 'explain' }, [...groups.values()].map(cls => h('li', {},
           cls[0].rules.map(i => q.options[i]).join(' and ') + ' ruled out by ' +
-          cls.map(cl => `report #${cl.num}` + (p.solo ? '' : ` (${holderName(cl)})`)).join(' + ') + (cls.length > 1 ? ' together' : '') + '.'))),
+          cls.map(cl => `report #${cl.num}` + (p.solo ? '' : ` (${holderName(cl)})`)).join(' + ') + (cls.length > 1 ? ' together' : '') +
+          (cls[0].fact != null && q.facts ? ` against the case file: “${q.facts[cls[0].fact].text.replace(/\.$/, '')}”` : '') + '.'))),
         h('p', { class: 'small muted' }, `An even split would have scored ${Math.round(r.flat[qi])}` + (p.solo || !A ? '.' : `; the best answer possible with the reports you gathered, ${Math.round(A.info.perQ[qi].best)}.`)));
     });
     const m = r.metrics;

@@ -4,7 +4,7 @@ const PZ = require('../src/puzzles.js');
 const C = require('../src/coach.js');
 
 // Study 2's six AI-team items (GroupHP_clues_stories.xlsx on OSF): layout, and per question the report
-// slots (1–10) that rule an option out. Every other slot is an irrelevant fact.
+// slots (1–10) that rule an option out. Every other slot is a fact that rules nothing out.
 const ORIGINAL = {
   A2: { title: 'Natural History Museum', layout: 'X', out: [[9, 10], [8, 9, 10]] },
   B2: { title: 'Great Farm', layout: 'Y', out: [[9, 10], [10]] },
@@ -48,6 +48,14 @@ for (const p of PZ.PUZZLES) {
         const slots = PZ.LAYOUTS[p.layout];
         assert.deepStrictEqual(qc.map((c, i) => (c.kind === 'out' ? i + 1 : 0)).filter(Boolean), o.out[qi], p.id + ' Q' + (qi + 1) + ' rule-out slots match ' + p.mirrors);
         qc.forEach((c, i) => assert(slots[i] === c.holder || (/^F\d$/.test(slots[i]) && /^f\d$/.test(c.holder)), 'slot ' + (i + 1) + ' holder'));
+        // the case file: a decisive report rules its option out only against a case fact, and says nothing about it
+        // itself, so a teammate without the case file can't tell which of its reports matter
+        assert(q.facts && q.facts.length >= 1, p.id + ' Q' + (qi + 1) + ' has a case file');
+        q.facts.forEach((f, i) => assert(C.factMentions(p, f.text).some(m => m.q === qi && m.i === i), 'case fact is recognised by its key words: ' + f.text));
+        qc.forEach(c => {
+          assert(!/\bruled?\s+(?:\w+\s+)?out\b|\bso (?:it|they|he|she)\b|\bcannot\b|\bcan't\b|\b(?:is|are) out\b/i.test(c.text), 'a report states no conclusion: ' + c.text);
+          if (c.kind === 'out') assert(Number.isInteger(c.fact) && q.facts[c.fact], 'a decisive report names the case fact it clashes with: ' + c.text);
+        });
         // nobody can solve it alone: the leader's reports never cover every ruled-out option
         const leaderRuled = new Set(qc.filter(c => (c.holder === 'leader' || c.holder === 'public') && c.kind === 'out').flatMap(c => c.rules));
         assert(leaderRuled.size < expected.length, p.id + ' Q' + (qi + 1) + ' needs the followers');

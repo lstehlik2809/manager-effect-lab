@@ -2,10 +2,16 @@
  * The team puzzles are new, but each copies the structure of one of Study 2's six AI-team puzzles, as
  * published in the authors' clue file on OSF (doi:10.17605/OSF.IO/QDY9V, GroupHP_clues_stories.xlsx):
  * 2 questions x 5 options; per question 10 reports, of which every member (leader + 3 followers) sees 4:
- * the 2 shared ones and 2 private ones. Reports either rule one option out on their own, saying so, or are
- * irrelevant facts about one of the options. The rule-out reports sit in the same slots as in the original
+ * the 2 shared ones and 2 private ones. The rule-out reports sit in the same slots as in the original
  * item, so the number of options left standing and who holds the decisive reports match it question by
  * question. Options that are not ruled out are equally likely: that is the correct credence profile.
+ * One deliberate change from the original: there, a decisive report says that it rules an option out, so
+ * teammates know which of their reports matter and one broad request ("send everything that rules an
+ * option out") draws out the whole puzzle. Here every report is a plain fact about one option, and it
+ * rules that option out only against a fact in the case file, which only the leader sees. The other
+ * reports are facts of the same kind that fit the case file. So teammates can't pick out their decisive
+ * reports on their own: the leader has to ask about the options, share the case facts, or collect
+ * everything a couple of reports at a time.
  * The original's three follower roles are rotated over Mira, Theo and Jonas from puzzle to puzzle, so no
  * teammate is always the one holding the most.
  * Three solo puzzles (every report visible) measure individual reasoning, the hard skill that the group
@@ -15,7 +21,7 @@
   'use strict';
 
   // Bump when puzzles or scoring change: scores from different versions are not comparable.
-  const VERSION = 3;
+  const VERSION = 4;
 
   const FOLLOWERS = [
     { id: 'f1', name: 'Mira' },
@@ -31,14 +37,17 @@
   };
 
   /** A team puzzle. roles maps the original follower roles F1–F3 to teammates; each question lists its
-   * 10 reports in slot order, a string for an irrelevant fact or [text, option] for a report that rules
-   * that option out. */
+   * case facts (leader only) as [text, key words], and its 10 reports in slot order: a string for a fact
+   * that fits the case file, or [text, option, fact] for a fact that rules that option out against case
+   * fact number `fact`. The key words let the scripted teammates and the feedback notice when the leader
+   * passes a case fact on. */
   function team(id, mirrors, layout, roles, title, scenario, questions) {
     const slots = LAYOUTS[layout], who = s => (s in roles ? roles[s] : s);
     const clues = questions.flatMap((q, qi) => q.reports.map((r, i) => Array.isArray(r)
-      ? { q: qi, holder: who(slots[i]), kind: 'out', rules: [r[1]], text: r[0] }
+      ? { q: qi, holder: who(slots[i]), kind: 'out', rules: [r[1]], fact: r[2], text: r[0] }
       : { q: qi, holder: who(slots[i]), kind: 'noise', text: r }));
-    return { id, mirrors, layout, title, scenario, questions: questions.map(q => ({ text: q.text, options: q.options, answer: q.answer })), clues };
+    return { id, mirrors, layout, title, scenario, clues,
+      questions: questions.map(q => ({ text: q.text, options: q.options, answer: q.answer, facts: q.facts.map(f => ({ text: f[0], keys: f[1].split(' ') })) })) };
   }
   /** A solo puzzle: every report is visible. */
   function solo(id, title, scenario, questions) {
@@ -115,153 +124,210 @@
 
     team('t1', 'A2', 'X', { F1: 'f1', F2: 'f2', F3: 'f3' }, 'The Unsigned Portrait',
       'A small gallery has found an unsigned portrait in an old frame in its storeroom. Your team must work out which artists could have painted it and which workshops could have made the frame.', [
-        { text: 'Which artists could have painted it?', options: ['Ana Varga', 'Bruno Keller', 'Clara Moss', 'Dario Ricci', 'Elin Berg'], answer: [0, 2, 3], reports: [
-          'Dario Ricci taught drawing at the city art school for twenty years.',
-          'Clara Moss often painted members of her own family.',
-          'Ana Varga exhibited her work in Vienna twice.',
-          'Bruno Keller kept a diary of every painting he sold.',
-          'Elin Berg was born in a fishing village on the coast.',
-          'Ana Varga learned to paint from her uncle.',
-          'Clara Moss worked on the top floor of a former bakery.',
-          'Bruno Keller won a regional art prize as a young man.',
-          ['Bruno Keller painted only on wooden panels, and the portrait is on canvas, so he did not paint it.', 1],
-          ['The portrait contains a blue pigment first made in 1950, after Elin Berg died, so she cannot have painted it.', 4]] },
-        { text: 'Which workshops could have made the frame?', options: ['Linden & Sons', 'Marlow Frames', 'Northgate Studio', 'Oakley Brothers', 'Pellow Workshop'], answer: [2, 4], reports: [
-          'Pellow Workshop also repaired church furniture.',
-          'Northgate Studio was run by two sisters.',
-          'Linden & Sons was the oldest of the five workshops.',
-          'Marlow Frames sold most of its frames to shops in the capital.',
-          'Oakley Brothers advertised in the local newspaper every week.',
-          'Northgate Studio moved to a bigger building in 1962.',
-          'Pellow Workshop trained many apprentices.',
-          ['Linden & Sons made only gilded frames, and this frame is plain dark wood, so it is not theirs.', 0],
-          ['Oakley Brothers stamped their name on the back of every frame, and this one has no stamp, so they did not make it.', 3],
-          ['Marlow Frames joined corners only with metal brackets, and this frame\'s corners are glued, so Marlow did not make it.', 1]] }
+        { text: 'Which artists could have painted it?', options: ['Ana Varga', 'Bruno Keller', 'Clara Moss', 'Dario Ricci', 'Elin Berg'], answer: [0, 2, 3],
+          facts: [
+            ['The portrait is painted in oil on canvas.', 'canvas oil'],
+            ['Its blue paint contains a pigment that was first made in 1950.', 'pigment 1950 blue'],
+            ['It is 60 cm tall and 50 cm wide.', 'tall wide size 60']],
+          reports: [
+            'Dario Ricci painted on canvas all his life.',
+            'Ana Varga painted in oils until the late 1970s.',
+            'Clara Moss painted on canvases of every size, from tiny to two metres wide.',
+            'Ana Varga\'s portraits are never more than 80 cm on any side.',
+            'Bruno Keller stopped painting in 1972.',
+            'Dario Ricci bought his paints from a shop that always stocked the newest colours.',
+            'Clara Moss painted in oils from 1955 onwards.',
+            'Elin Berg\'s portraits are all between 40 and 70 cm tall.',
+            ['Bruno Keller painted only on wooden panels.', 1, 0],
+            ['Elin Berg died in 1948.', 4, 1]] },
+        { text: 'Which workshops could have made the frame?', options: ['Linden & Sons', 'Marlow Frames', 'Northgate Studio', 'Oakley Brothers', 'Pellow Workshop'], answer: [2, 4],
+          facts: [
+            ['The frame is plain dark wood, with no gilding.', 'gilding gilded plain'],
+            ['Its corners are glued, with no nails or metal brackets.', 'corners glued nails brackets'],
+            ['There is no maker\'s stamp or label anywhere on it.', 'stamp stamped label']],
+          reports: [
+            'Pellow Workshop made frames in both plain and gilded styles.',
+            'Northgate Studio always glued its corners.',
+            'Linden & Sons put a paper label on some of its frames, but not all.',
+            'Oakley Brothers worked mostly in oak and walnut.',
+            'Marlow Frames often used dark woods such as walnut.',
+            'Pellow Workshop never marked its frames in any way.',
+            'Northgate Studio often stained its frames dark brown.',
+            ['Linden & Sons made only gilded frames.', 0, 0],
+            ['Oakley Brothers stamped their name on the back of every frame.', 3, 2],
+            ['Marlow Frames joined every corner with metal brackets.', 1, 1]] }
       ]),
     team('t2', 'F2', 'Y', { F1: 'f2', F2: 'f3', F3: 'f1' }, 'The Rooftop Garden',
       'Your company is turning the office roof into a garden for staff. Your team must work out which plants can be grown there and which watering methods can be used.', [
-        { text: 'Which plants can be grown on the roof?', options: ['Lavender', 'Tomatoes', 'Sunflowers', 'Bamboo', 'Strawberries'], answer: [0, 1, 2, 4], reports: [
-          'Tomatoes come in hundreds of varieties.',
-          'Sunflowers turn to follow the sun while they are young.',
-          'Lavender attracts bees and butterflies.',
-          'Strawberries are the only common fruit with their seeds on the outside.',
-          'Bamboo is one of the fastest-growing plants in the world.',
-          'Dried lavender is often kept in small cloth bags in wardrobes.',
-          'Tomatoes were first grown in South America.',
-          'The tallest sunflower on record grew to over nine metres.',
-          'Strawberries belong to the rose family.',
-          ['Bamboo roots can break through the roof\'s waterproof layer, and the building\'s insurer forbids it, so bamboo cannot be grown.', 3]] },
-        { text: 'Which watering methods can be used?', options: ['Drip lines', 'Sprinklers', 'Rain barrels', 'Self-watering pots', 'Hand-watering rota'], answer: [0, 3], reports: [
-          'Drip lines are widely used in vineyards.',
-          'Self-watering pots come in many colours.',
-          'Sprinklers come in fixed and rotating types.',
-          'Rain barrels are usually made of plastic or wood.',
-          'The facilities team already runs a rota for cleaning the coffee machines.',
-          'Drip lines can be hidden under a layer of bark chips.',
-          'Self-watering pots have a small water tank in the base.',
-          ['Sprinklers would spray the windows of the offices next door, which the lease forbids, so sprinklers are out.', 1],
-          ['Full rain barrels would be too heavy for the roof, so rain barrels are ruled out.', 2],
-          ['The roof\'s only tap is locked and just the caretaker has the key, so a hand-watering rota cannot work.', 4]] }
+        { text: 'Which plants can be grown on the roof?', options: ['Lavender', 'Tomatoes', 'Sunflowers', 'Bamboo', 'Strawberries'], answer: [0, 1, 2, 4],
+          facts: [
+            ['The roof beds are 40 cm deep.', 'depth 40'],
+            ['The roof gets full sun from morning to evening.', 'sunny shade evening']],
+          reports: [
+            'Tomatoes need at least six hours of sun a day.',
+            'Sunflowers grow well in beds 30 cm deep or more.',
+            'Lavender needs full sun and dry soil.',
+            'Strawberries have shallow roots, about 15 cm deep.',
+            'Tomatoes grow well in tubs 30 cm deep.',
+            'Lavender grows happily in beds 25 cm deep.',
+            'Bamboo grows well in full sun.',
+            'Strawberries give the most fruit in full sun.',
+            'Sunflowers need full sun to flower.',
+            ['Bamboo needs a bed at least 60 cm deep.', 3, 0]] },
+        { text: 'Which watering methods can be used?', options: ['Drip lines', 'Sprinklers', 'Rain barrels', 'Self-watering pots', 'Hand-watering rota'], answer: [0, 3],
+          facts: [
+            ['The windows of the offices next door are five metres from the beds, and the lease forbids wetting them.', 'windows lease wetting next door'],
+            ['The roof can carry at most 100 kg per square metre.', 'carry kg weight load'],
+            ['The roof is locked from Friday evening to Monday morning.', 'locked friday monday weekend']],
+          reports: [
+            'Drip lines deliver water straight to the roots, without spraying.',
+            'Self-watering pots weigh about 40 kg per square metre when full.',
+            'Sprinklers can be set to run only at night.',
+            'Rain barrels fill up after a single heavy storm.',
+            'Drip lines run on a timer, so nobody needs to be on the roof.',
+            'Self-watering pots only need refilling once every two weeks.',
+            'A hand-watering rota is a cheap way to get staff involved.',
+            ['Sprinklers throw water in a wide spray up to eight metres.', 1, 0],
+            ['A full rain barrel weighs about 250 kg per square metre of floor.', 2, 1],
+            ['In summer, a hand-watering rota needs someone on the roof every day, weekends included.', 4, 2]] }
       ]),
     team('t3', 'C2', 'Y', { F1: 'f3', F2: 'f1', F3: 'f2' }, 'The Charity Run',
       'Your company is organising a 5 km charity run for staff. Your team must work out which parks could host it and which charity will receive the money raised.', [
-        { text: 'Which parks could host the run?', options: ['Ashford Park', 'Brookside Park', 'Cedar Hill', 'Dunmore Green', 'Elmwood Common'], answer: [2, 3], reports: [
-          'Cedar Hill has a café next to its main gate.',
-          'Dunmore Green has the oldest oak tree in the city.',
-          'Ashford Park has a lake with rowing boats.',
-          'Brookside Park is popular with dog walkers.',
-          'Elmwood Common was a royal hunting ground centuries ago.',
-          'Cedar Hill has views over the whole city.',
-          'Dunmore Green\'s paths were resurfaced last year.',
-          ['Brookside Park\'s main path is closed for repairs all spring, so the run cannot be held there.', 1],
-          ['Elmwood Common is too small for a 5 km route, so it is ruled out.', 4],
-          ['Ashford Park is booked for a music festival on the only free date, so it cannot host the run.', 0]] },
-        { text: 'Which charity will receive the money?', options: ['Clean Rivers Trust', 'Books for All', 'Animal Rescue League', 'Youth Sports Fund', 'Elder Care Network'], answer: [1], reports: [
-          'Books for All was founded by two retired teachers.',
-          'Clean Rivers Trust organises river clean-ups every autumn.',
-          'Animal Rescue League runs three shelters in the region.',
-          'Youth Sports Fund buys equipment for school teams.',
-          'Elder Care Network trains volunteers to visit older people at home.',
-          'Books for All sends boxes of books to village schools.',
-          ['Clean Rivers Trust received the company\'s donation last year, and no charity may receive it twice in a row, so it is out.', 0],
-          ['Youth Sports Fund is not yet a registered charity, so it cannot receive the money.', 3],
-          ['Animal Rescue League has asked not to be considered this year, so it is out.', 2],
-          ['The chair of Elder Care Network sits on the company\'s board, a conflict of interest, so it is ruled out.', 4]] }
+        { text: 'Which parks could host the run?', options: ['Ashford Park', 'Brookside Park', 'Cedar Hill', 'Dunmore Green', 'Elmwood Common'], answer: [2, 3],
+          facts: [
+            ['The run is on Saturday 12 May.', 'saturday may date'],
+            ['About 300 staff have signed up to run.', '300 signed runners people'],
+            ['The route needs 5 km of paved path, as one loop or two laps of a shorter one.', 'paved loop laps']],
+          reports: [
+            'Cedar Hill has a paved loop of 2.5 km.',
+            'Dunmore Green holds a farmers\' market on Sunday mornings.',
+            'Ashford Park\'s paths are all paved.',
+            'Brookside Park can take crowds of up to 1,000 people.',
+            'Cedar Hill\'s lawn can hold about 500 people.',
+            'Elmwood Common is free to hire on every Saturday in May.',
+            'Dunmore Green\'s paved path forms a 5 km loop.',
+            ['Brookside Park\'s main path is closed for repairs from April to June.', 1, 0],
+            ['Elmwood Common allows groups of no more than 100 people.', 4, 1],
+            ['Ashford Park is booked for a music festival on 12 and 13 May.', 0, 0]] },
+        { text: 'Which charity will receive the money?', options: ['Clean Rivers Trust', 'Books for All', 'Animal Rescue League', 'Youth Sports Fund', 'Elder Care Network'], answer: [1],
+          facts: [
+            ['No charity may receive the donation two years running.', 'running two years'],
+            ['The money may go only to a registered charity.', 'registered registration'],
+            ['No charity with a link to a board member may receive it.', 'board member link'],
+            ['The money must be spent in this region.', 'spent region']],
+          reports: [
+            'Books for All has been a registered charity since 2009.',
+            'Clean Rivers Trust works on rivers across the region.',
+            'Animal Rescue League is a registered charity.',
+            'Youth Sports Fund buys equipment for school teams in the region.',
+            'Elder Care Network has never received money from the company.',
+            'Books for All\'s founders have no ties to the company.',
+            ['Clean Rivers Trust received the company\'s donation last year.', 0, 0],
+            ['Youth Sports Fund is still waiting for its charity registration.', 3, 1],
+            ['All of Animal Rescue League\'s shelters are in the neighbouring country.', 2, 3],
+            ['The chair of Elder Care Network also sits on the company\'s board.', 4, 2]] }
       ]),
     team('t4', 'B2', 'Y', { F1: 'f1', F2: 'f3', F3: 'f2' }, 'The Launch Film',
       'Your company is making a short film for a product launch. Your team must work out which locations can be used for filming and which music tracks can be licensed.', [
-        { text: 'Which locations can be used for filming?', options: ['Old Harbour', 'Glass Atrium', 'Clock Tower', 'Rooftop Bar', 'Train Depot'], answer: [0, 1, 3], reports: [
-          'The Old Harbour has appeared in several television series.',
-          'The Glass Atrium stays lit by daylight until late evening in summer.',
-          'The Clock Tower\'s clock has not been wound since 1990.',
-          'The Rooftop Bar serves a drink named after the owner\'s dog.',
-          'The Train Depot now houses a small railway museum.',
-          'The Old Harbour\'s crane is painted red and white.',
-          'The Glass Atrium was designed by a Danish architect.',
-          'The Rooftop Bar has room for about eighty guests.',
-          ['The Clock Tower\'s owners never allow filming inside, so it cannot be used.', 2],
-          ['The Train Depot is closed for asbestos removal until next year, so it is out.', 4]] },
-        { text: 'Which music tracks can be licensed?', options: ['Blue Morning', 'Paper Planes', 'City Lights', 'Slow River', 'Golden Hour'], answer: [0, 2, 3, 4], reports: [
-          'Golden Hour was recorded in a single afternoon.',
-          'Slow River features a cello solo.',
-          'Blue Morning is just over three minutes long.',
-          'City Lights was written by a former jazz pianist.',
-          'Paper Planes is the fastest of the five tracks.',
-          'City Lights has no lyrics.',
-          'Blue Morning was played at the company\'s last summer party.',
-          'Slow River comes in a long and a short version.',
-          'Golden Hour\'s composer lives abroad.',
-          ['A car maker has bought exclusive rights to Paper Planes, so it cannot be licensed.', 1]] }
+        { text: 'Which locations can be used for filming?', options: ['Old Harbour', 'Glass Atrium', 'Clock Tower', 'Rooftop Bar', 'Train Depot'], answer: [0, 1, 3],
+          facts: [
+            ['Filming takes place in the second week of March.', 'march week'],
+            ['The crew of 12 must all be on set together.', 'crew together'],
+            ['Every location needs the owner\'s written permission.', 'permission written']],
+          reports: [
+            'The Old Harbour is open to film crews all year round.',
+            'The Glass Atrium can host crews of up to 20 people.',
+            'The Rooftop Bar is closed to guests on Mondays and rents itself out for shoots then.',
+            'The Clock Tower is open to visitors from March to October.',
+            'The Train Depot\'s owners like to see the building in films.',
+            'The Old Harbour\'s harbour master gives written permission within a day.',
+            'The Rooftop Bar\'s owner has agreed to filming in writing before.',
+            'The Glass Atrium has no bookings in March.',
+            ['The Clock Tower\'s top room holds at most six people at a time.', 2, 1],
+            ['The Train Depot is closed for building work from February to May.', 4, 0]] },
+        { text: 'Which music tracks can be licensed?', options: ['Blue Morning', 'Paper Planes', 'City Lights', 'Slow River', 'Golden Hour'], answer: [0, 2, 3, 4],
+          facts: [
+            ['The film will be shown worldwide, so the licence must cover every country.', 'worldwide every country'],
+            ['The track must be at least two minutes long.', 'minutes long']],
+          reports: [
+            'Blue Morning can be licensed for any country.',
+            'Slow River\'s long version runs for six minutes.',
+            'City Lights is two and a half minutes long.',
+            'Golden Hour\'s licence covers all countries.',
+            'Paper Planes is three minutes long.',
+            'Slow River\'s licence covers every country.',
+            'Blue Morning is just over three minutes long.',
+            'Golden Hour is four minutes long.',
+            'City Lights can be licensed worldwide.',
+            ['Paper Planes can only be licensed for use in Europe.', 1, 0]] }
       ]),
     team('t5', 'E2', 'X', { F1: 'f2', F2: 'f1', F3: 'f3' }, 'The Mystery Delivery',
       'A large box with no sender\'s name arrived at the office reception this morning. Your team must work out which supplier sent it and what could be inside.', [
-        { text: 'Which supplier sent the box?', options: ['Alder Supplies', 'Birchwood Ltd', 'Copperfield & Co', 'Driftwood Trading', 'Evergreen Goods'], answer: [2], reports: [
-          'Alder Supplies has been in business for forty years.',
-          'Birchwood Ltd sponsors the local football club.',
-          'Copperfield & Co is a family business.',
-          'Driftwood Trading has a warehouse near the airport.',
-          'Evergreen Goods offers free delivery on large orders.',
-          'Birchwood Ltd employs about fifty people.',
-          ['Alder Supplies closed down in the spring, so it did not send the box.', 0],
-          ['Birchwood Ltd only ships in green boxes, and this box is brown, so it is not from Birchwood.', 1],
-          ['Driftwood Trading has never supplied this office and has no record of its address, so it did not send the box.', 3],
-          ['Evergreen Goods only delivers within its own city, and this office is outside it, so the box is not from Evergreen.', 4]] },
-        { text: 'What could be inside the box?', options: ['Office chairs', 'Printer paper', 'Coffee beans', 'Desk lamps', 'Laptop stands'], answer: [1, 2, 3, 4], reports: [
-          'Printer paper is usually sold in packs of 500 sheets.',
-          'Coffee beans keep best in airtight bags.',
-          'Desk lamps with warm light are said to help people relax.',
-          'Laptop stands can raise a screen to eye level.',
-          'Office chairs usually have five wheels.',
-          'Recycled printer paper is slightly grey.',
-          'Some desk lamps have a phone charger built into the base.',
-          'Coffee beans from different farms are often blended.',
-          'Laptop stands are often made of aluminium.',
-          ['The box is only ten centimetres deep, too flat for an office chair, so it does not hold chairs.', 0]] }
+        { text: 'Which supplier sent the box?', options: ['Alder Supplies', 'Birchwood Ltd', 'Copperfield & Co', 'Driftwood Trading', 'Evergreen Goods'], answer: [2],
+          facts: [
+            ['The box is made of brown cardboard.', 'brown cardboard colour'],
+            ['It came by post, with a Riverton postmark.', 'post postmark riverton'],
+            ['The postmark is dated 3 October.', 'october dated']],
+          reports: [
+            'Copperfield & Co sends its parcels by post.',
+            'Alder Supplies always used brown boxes.',
+            'Evergreen Goods packs everything in brown cardboard.',
+            'Copperfield & Co\'s warehouse is in Riverton.',
+            'Birchwood Ltd posts its parcels from Riverton.',
+            'Driftwood Trading ships in plain brown boxes.',
+            ['Alder Supplies closed down in July.', 0, 2],
+            ['Birchwood Ltd ships everything in green boxes.', 1, 0],
+            ['Driftwood Trading sends all its parcels from its warehouse in Northport.', 3, 1],
+            ['Evergreen Goods delivers only with its own vans, never by post.', 4, 1]] },
+        { text: 'What could be inside the box?', options: ['Office chairs', 'Printer paper', 'Coffee beans', 'Desk lamps', 'Laptop stands'], answer: [1, 2, 3, 4],
+          facts: [
+            ['The box is 10 cm deep, 60 cm wide and 40 cm long.', 'deep wide size'],
+            ['It weighs about 8 kg.', 'weighs kg']],
+          reports: [
+            'A ream of printer paper is about 5 cm thick.',
+            'A pack of coffee beans weighs one kilogram.',
+            'Desk lamps can be shipped flat, in parts.',
+            'Laptop stands fold flat to about 2 cm.',
+            'Office chairs usually arrive with the seat and the wheels packed separately.',
+            'Desk lamps weigh about 1 kg each.',
+            'Coffee beans are often shipped in flat bags.',
+            'Laptop stands weigh under 1 kg each.',
+            'Printer paper weighs about 2.5 kg per ream.',
+            ['Even packed flat, an office chair needs a box at least 30 cm deep.', 0, 0]] }
       ]),
     team('t6', 'D2', 'Y', { F1: 'f3', F2: 'f2', F3: 'f1' }, 'The Coffee Corner',
       'The office is setting up a coffee corner for staff. Your team must work out which rooms it could go in and which coffee machines could be bought.', [
-        { text: 'Which rooms could it go in?', options: ['Library Room', 'Boardroom', 'Old Archive', 'Print Room', 'Window Bay'], answer: [0, 4], reports: [
-          'The Library Room has a large map of the world on one wall.',
-          'The Window Bay looks out over the car park.',
-          'The Boardroom has a long oak table.',
-          'The Old Archive has blue carpet.',
-          'The Print Room is next to the stairs.',
-          'The Library Room is the quietest room on the floor.',
-          'The Window Bay gets the most sunshine in the morning.',
-          ['The Boardroom has no water supply, and every machine needs one, so the coffee corner cannot go there.', 1],
-          ['Fire rules forbid kitchens in rooms without a fire exit, and the Old Archive has none, so it is out.', 2],
-          ['The Print Room will become a meeting room next month, so the coffee corner cannot go there.', 3]] },
-        { text: 'Which coffee machines could be bought?', options: ['Aroma 500', 'Barista Pro', 'Crema One', 'Duo Brew', 'Espresso Max'], answer: [0, 1, 2, 3], reports: [
-          'The Aroma 500 can also make hot chocolate.',
-          'The Barista Pro has a touch screen.',
-          'The Crema One comes in black or silver.',
-          'The Duo Brew makes two cups at once.',
-          'The Espresso Max won a design award.',
-          'The Barista Pro came out last year.',
-          'The Crema One is made in Italy.',
-          'The Duo Brew\'s water tank holds two litres.',
-          'The Aroma 500 is quieter than most machines.',
-          ['The Espresso Max needs a stronger power socket than any on this floor, so it cannot be bought.', 4]] }
+        { text: 'Which rooms could it go in?', options: ['Library Room', 'Boardroom', 'Old Archive', 'Print Room', 'Window Bay'], answer: [0, 4],
+          facts: [
+            ['Every machine on the shortlist needs a water supply in the room.', 'water supply'],
+            ['Fire rules allow a kitchen only in a room with a fire exit.', 'fire exit'],
+            ['The coffee corner must stay where it is for at least a year.', 'year stay']],
+          reports: [
+            'The Library Room has a sink in one corner.',
+            'The Window Bay has a fire exit next to it.',
+            'The Old Archive has a sink.',
+            'The Boardroom has two fire exits.',
+            'The Window Bay has a water pipe under the floor, ready to connect.',
+            'The Library Room is next to the main fire exit.',
+            'The Print Room has a water supply.',
+            ['The Boardroom has no water supply.', 1, 0],
+            ['The Old Archive has no fire exit.', 2, 1],
+            ['The Print Room will be turned into a meeting room next month.', 3, 2]] },
+        { text: 'Which coffee machines could be bought?', options: ['Aroma 500', 'Barista Pro', 'Crema One', 'Duo Brew', 'Espresso Max'], answer: [0, 1, 2, 3],
+          facts: [
+            ['The sockets on this floor supply at most 13 amps.', 'sockets amps amp'],
+            ['The budget is 1,500 euros per machine.', 'budget euros']],
+          reports: [
+            'The Aroma 500 runs on a normal 13-amp socket.',
+            'The Barista Pro costs 1,200 euros.',
+            'The Crema One costs 900 euros.',
+            'The Duo Brew runs on a 10-amp socket.',
+            'The Espresso Max costs 1,400 euros.',
+            'The Crema One runs on a 13-amp socket.',
+            'The Duo Brew costs 1,100 euros.',
+            'The Aroma 500 costs 1,450 euros.',
+            'The Barista Pro needs a 13-amp socket.',
+            ['The Espresso Max needs a 16-amp socket.', 4, 0]] }
       ])
   ];
 
@@ -286,7 +352,8 @@
     return p.clues.filter(c => c.kind !== 'noise' && /^f\d$/.test(c.holder));
   }
 
-  /** Standing instructions for an LLM teammate: the puzzle, its own reports, and how to behave in the chat. */
+  /** Standing instructions for an LLM teammate: the puzzle, its own reports, and how to behave in the chat.
+   * The case file is left out on purpose: teammates learn case facts only when the leader passes them on. */
   function followerBrief(p, f) {
     const L = 'ABCDE';
     const qs = p.questions.map((q, i) => `Question ${i + 1}: ${q.text} Options: ${q.options.map((o, k) => L[k] + ') ' + o).join(', ')}.`).join('\n');
@@ -296,17 +363,20 @@
 THE PUZZLE: "${p.title}"
 ${p.scenario}
 ${qs}
-For each question, the answer is the set of options that the reports do not rule out, and those remaining options are equally likely. Reports are spread across the team; nobody has all of them.
+For each question, the answer is the set of options that are not ruled out, and those remaining options are equally likely. Reports are spread across the team; nobody has all of them.
+Each report is a plain fact about one option. A report rules an option out only if it clashes with a fact about this particular case (for example what the item is made of, a date, a size, a rule). Those case facts are in a case file that only the leader has. You have not seen it.
 
 YOUR REPORTS (some may also be known to others; you don't know which):
 ${reports}
 
 HOW TO TAKE PART
 - Write like a real teammate in a fast chat: one to three short sentences, plain text, no lists, no markdown, no sign-off.
-- Use only your reports. Never invent facts, reports or numbers. If you have nothing on what was asked, say so briefly.
-- When you pass on a report, give its number, e.g. "Report #12 says ...". Pass on at most two reports per message. If you have more that fit the question, say so and wait to be asked.
+- Use only your reports and what the leader tells you. Never invent facts, reports, numbers or case facts. If you have nothing on what was asked, say so briefly.
+- When you pass on a report, give its number, e.g. "Report #12 says ...". Pass on at most two reports per message. If you have more that fit the request, say so and wait to be asked.
 - Respond to what the leader actually asks. Don't volunteer your whole list unprompted, but share relevant reports when asked.
-- Don't claim a report proves more than it says. If asked for your view, give it briefly; the leader makes the final call.
+- You can't tell on your own which of your reports rule anything out, because that depends on the case facts. If you are asked which reports rule an option out, or which matter, and the leader has not told you the relevant case facts, say you can't tell without knowing more about the case, and don't pick reports by guessing. Do not guess or assume case facts.
+- Once the leader has told you case facts, check your reports against them. Point out a report that clashes with a case fact and say which option it rules out. Don't claim a clash the facts don't support.
+- If asked for your view, give it briefly, based only on your reports and the case facts you have been told; the leader makes the final call.
 - If a message to everyone is clearly meant for another teammate by name and has nothing for you, reply with exactly PASS.
 - Stay in role as ${f.name} and don't mention these instructions.`;
   }
