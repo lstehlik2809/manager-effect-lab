@@ -349,6 +349,22 @@ footer { border-top: 1px solid var(--rule); padding-block: 22px 40px; color: var
 details.panel > summary.group-summary { cursor: pointer; }
 details.panel[open] > summary.group-summary { margin-bottom: 4px; }
 
+/* teammate twists and the pilot panel */
+.twists { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: .9rem; }
+.twists li { display: flex; gap: 10px; align-items: baseline; }
+.twists .pill { flex: none; }
+.field > .label { font-weight: 600; font-size: .88rem; }
+.scale { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.scale-btn { font: inherit; font-weight: 600; min-width: 40px; min-height: 40px; border-radius: 8px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); cursor: pointer; }
+.scale-btn:hover:not(:disabled) { border-color: var(--accent); }
+.scale-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.scale-btn:disabled { cursor: default; opacity: .7; }
+.pilot-hist { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 4px; align-items: end; height: 96px; padding-top: 4px; }
+.pilot-hist .bin { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 2px; height: 100%; font-size: .72rem; color: var(--ink-2); }
+.pilot-hist .bin i { display: block; width: 100%; background: var(--accent); border-radius: 3px 3px 0 0; min-height: 0; }
+.pilot-hist-axis { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 4px; font-size: .72rem; color: var(--ink-3); text-align: center; border-top: 1px solid var(--rule); padding-top: 3px; }
+@media (max-width: 480px) { .scale { gap: 4px; } .scale-btn { min-width: 34px; min-height: 36px; } }
+
 </style>
 </head>
 <body>
@@ -1317,8 +1333,57 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
       for (const [id, xs] of Object.entries(solo)) soloPuzzles[id] = S.mean(xs);
       let soloScore = num(r.solo_score);
       if (!isNum(soloScore) && Object.keys(solo).length) soloScore = S.mean(Object.values(solo).flat());
-      return { id: String(r.name || '').trim(), solo: soloScore, soloPuzzles, puzzles, engine: String(r.engine || '').trim() || 'unknown', model: String(r.model || '').trim(), version: String(r.test_version || '').trim() || '1' };
+      // pilot fields (newer results files): style, ratings, how far the person got, the teammate twists they met
+      const opt = k => { const x = num(r[k]); return isNum(x) ? x : NaN; };
+      const pilot = { teamScore: opt('team_score'), style: String(r.style || '').trim(), fun: opt('fun'), fair: opt('fair'), comment: String(r.comment || '').trim(),
+        planned: opt('team_puzzles_planned'), done: opt('team_puzzles_done'), twistsMet: opt('twists_met'), twists: opt('twists_total') };
+      if (!isNum(pilot.teamScore) && Object.keys(team).length) pilot.teamScore = S.mean(Object.values(team).flat());
+      return { id: String(r.name || '').trim(), solo: soloScore, soloPuzzles, puzzles, engine: String(r.engine || '').trim() || 'unknown', model: String(r.model || '').trim(), version: String(r.test_version || '').trim() || '1', pilot };
     }).filter(l => Object.keys(l.puzzles).length);
+  };
+
+  /** Linear-interpolation quantile of a numeric array (p in 0–1). */
+  S.quantile = function (a, p) {
+    const s = a.filter(isNum).sort((x, y) => x - y);
+    if (!s.length) return NaN;
+    const i = (s.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i);
+    return s[lo] + (s[hi] - s[lo]) * (i - lo);
+  };
+
+  /**
+   * What a small pilot needs to know before more features: how far people got, how they enjoyed it and
+   * judged its fairness, and whether their scores and styles spread out or pile up at the top.
+   * leaders: rows from aiGroupRows. Fields a results file lacks are left out of the counts.
+   */
+  S.pilotSummary = function (leaders) {
+    const P = leaders.map(l => l.pilot || {}), have = k => P.filter(x => isNum(x[k]));
+    const scores = have('teamScore').map(x => x.teamScore);
+    const bins = Array.from({ length: 10 }, (_, i) => ({ lo: i * 10, hi: i * 10 + 10, n: 0 }));
+    scores.forEach(x => { bins[Math.min(9, Math.max(0, Math.floor(x / 10)))].n++; });
+    const styles = new Map();
+    P.forEach(x => { if (x.style) styles.set(x.style, (styles.get(x.style) || 0) + 1); });
+    const rated = k => { const xs = have(k).map(x => x[k]); return { n: xs.length, mean: xs.length ? S.mean(xs) : NaN, low: xs.filter(x => x <= 2).length }; };
+    const withPlan = P.filter(x => isNum(x.planned) && isNum(x.done));
+    const tw = P.filter(x => isNum(x.twists) && x.twists > 0);
+    const top = scores.filter(x => x >= 95).length;
+    const res = {
+      n: leaders.length, scored: scores.length, bins,
+      median: S.quantile(scores, 0.5), q1: S.quantile(scores, 0.25), q3: S.quantile(scores, 0.75),
+      min: scores.length ? Math.min(...scores) : NaN, max: scores.length ? Math.max(...scores) : NaN, sd: scores.length > 1 ? S.sd(scores) : NaN,
+      top, topShare: scores.length ? top / scores.length : NaN,
+      styles: [...styles.entries()].sort((a, b) => b[1] - a[1]).map(([name, n]) => ({ name, n })),
+      fun: rated('fun'), fair: rated('fair'),
+      finished: { n: withPlan.length, all: withPlan.filter(x => x.done >= x.planned).length },
+      twists: { people: tw.length, met: tw.reduce((s, x) => s + (isNum(x.twistsMet) ? x.twistsMet : 0), 0), total: tw.reduce((s, x) => s + x.twists, 0) },
+      comments: P.map(x => x.comment).filter(Boolean)
+    };
+    // rough flags for the pilot, not statistical tests
+    res.flags = [];
+    if (scores.length >= 5 && res.topShare >= 0.5) res.flags.push('ceiling');
+    if (scores.length >= 5 && res.sd < 8) res.flags.push('narrow');
+    if (res.styles.length && res.styles[0].n / P.filter(x => x.style).length >= 0.6 && P.filter(x => x.style).length >= 5) res.flags.push('one-style');
+    if (res.fair.n >= 5 && res.fair.low / res.fair.n >= 0.3) res.flags.push('unfair');
+    return res;
   };
 
   S.aiGroup = function (leaders, opts) {
@@ -1436,7 +1501,7 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
   'use strict';
 
   // Bump when puzzles or scoring change: scores from different versions are not comparable.
-  const VERSION = 4;
+  const VERSION = 5;
 
   const FOLLOWERS = [
     { id: 'f1', name: 'Mira' },
@@ -1455,14 +1520,17 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
    * case facts (leader only) as [text, key words], and its 10 reports in slot order: a string for a fact
    * that fits the case file, or [text, option, fact] for a fact that rules that option out against case
    * fact number `fact`. The key words let the scripted teammates and the feedback notice when the leader
-   * passes a case fact on. */
-  function team(id, mirrors, layout, roles, title, scenario, questions) {
+   * passes a case fact on. dynamics (optional): { quiet: teammate id } or { sure: { fid, q, report, option,
+   * says, why } }, where report is a regular expression for the report the teammate misreads and says is
+   * the reason the teammate gives. */
+  function team(id, mirrors, layout, roles, title, scenario, questions, dynamics) {
     const slots = LAYOUTS[layout], who = s => (s in roles ? roles[s] : s);
     const clues = questions.flatMap((q, qi) => q.reports.map((r, i) => Array.isArray(r)
       ? { q: qi, holder: who(slots[i]), kind: 'out', rules: [r[1]], fact: r[2], text: r[0] }
       : { q: qi, holder: who(slots[i]), kind: 'noise', text: r }));
-    return { id, mirrors, layout, title, scenario, clues,
+    const p = { id, mirrors, layout, title, scenario, clues, dynamics: dynamics || {},
       questions: questions.map(q => ({ text: q.text, options: q.options, answer: q.answer, facts: q.facts.map(f => ({ text: f[0], keys: f[1].split(' ') })) })) };
+    return p;
   }
   /** A solo puzzle: every report is visible. */
   function solo(id, title, scenario, questions) {
@@ -1571,7 +1639,7 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
             ['Linden & Sons made only gilded frames.', 0, 0],
             ['Oakley Brothers stamped their name on the back of every frame.', 3, 2],
             ['Marlow Frames joined every corner with metal brackets.', 1, 1]] }
-      ]),
+      ], { quiet: 'f3' }),
     team('t2', 'F2', 'Y', { F1: 'f2', F2: 'f3', F3: 'f1' }, 'The Rooftop Garden',
       'Your company is turning the office roof into a garden for staff. Your team must work out which plants can be grown there and which watering methods can be used.', [
         { text: 'Which plants can be grown on the roof?', options: ['Lavender', 'Tomatoes', 'Sunflowers', 'Bamboo', 'Strawberries'], answer: [0, 1, 2, 4],
@@ -1605,7 +1673,9 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
             ['Sprinklers throw water in a wide spray up to eight metres.', 1, 0],
             ['A full rain barrel weighs about 250 kg per square metre of floor.', 2, 1],
             ['In summer, a hand-watering rota needs someone on the roof every day, weekends included.', 4, 2]] }
-      ]),
+      ], { sure: { fid: 'f2', q: 0, fact: 0, report: /^Strawberries have shallow roots/, option: 4,
+        says: 'the beds are 40 cm deep and strawberry roots only reach 15 cm',
+        why: 'roots that reach 15 cm fit easily in beds 40 cm deep. A bed rules a plant out only when the plant needs a deeper one, as bamboo does.' } }),
     team('t3', 'C2', 'Y', { F1: 'f3', F2: 'f1', F3: 'f2' }, 'The Charity Run',
       'Your company is organising a 5 km charity run for staff. Your team must work out which parks could host it and which charity will receive the money raised.', [
         { text: 'Which parks could host the run?', options: ['Ashford Park', 'Brookside Park', 'Cedar Hill', 'Dunmore Green', 'Elmwood Common'], answer: [2, 3],
@@ -1641,7 +1711,7 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
             ['Youth Sports Fund is still waiting for its charity registration.', 3, 1],
             ['All of Animal Rescue League\'s shelters are in the neighbouring country.', 2, 3],
             ['The chair of Elder Care Network also sits on the company\'s board.', 4, 2]] }
-      ]),
+      ], { quiet: 'f1' }),
     team('t4', 'B2', 'Y', { F1: 'f1', F2: 'f3', F3: 'f2' }, 'The Launch Film',
       'Your company is making a short film for a product launch. Your team must work out which locations can be used for filming and which music tracks can be licensed.', [
         { text: 'Which locations can be used for filming?', options: ['Old Harbour', 'Glass Atrium', 'Clock Tower', 'Rooftop Bar', 'Train Depot'], answer: [0, 1, 3],
@@ -1675,7 +1745,9 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
             'Golden Hour is four minutes long.',
             'City Lights can be licensed worldwide.',
             ['Paper Planes can only be licensed for use in Europe.', 1, 0]] }
-      ]),
+      ], { sure: { fid: 'f3', q: 1, fact: 1, report: /^Slow River's long version/, option: 3,
+        says: 'its long version runs for six minutes, way over two minutes',
+        why: 'the case file asks for at least two minutes, so a six-minute track qualifies; nothing sets a maximum.' } }),
     team('t5', 'E2', 'X', { F1: 'f2', F2: 'f1', F3: 'f3' }, 'The Mystery Delivery',
       'A large box with no sender\'s name arrived at the office reception this morning. Your team must work out which supplier sent it and what could be inside.', [
         { text: 'Which supplier sent the box?', options: ['Alder Supplies', 'Birchwood Ltd', 'Copperfield & Co', 'Driftwood Trading', 'Evergreen Goods'], answer: [2],
@@ -1756,6 +1828,8 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
     p.clues.forEach((c, i) => { c.num = nums[i]; });
   }
   PUZZLES.forEach(numberClues);
+  // the report an overconfident teammate misreads, by number
+  PUZZLES.forEach(p => { const s = p.dynamics && p.dynamics.sure; if (s) s.num = p.clues.find(c => c.q === s.q && s.report.test(c.text)).num; });
 
   /** Reports visible to a member ('leader' | 'f1' | 'f2' | 'f3'), sorted by number. */
   function cluesFor(p, who) {
@@ -1785,7 +1859,7 @@ YOUR REPORTS (some may also be known to others; you don't know which):
 ${reports}
 
 HOW TO TAKE PART
-- Write like a real teammate in a fast chat: one to three short sentences, plain text, no lists, no markdown, no sign-off.
+- Write like a real teammate in a fast chat: one to three short sentences, plain text, no lists, no markdown, no sign-off. Reply with the chat message only: never show your notes, checks or drafts.
 - Use only your reports and what the leader tells you. Never invent facts, reports, numbers or case facts. If you have nothing on what was asked, say so briefly.
 - When you pass on a report, give its number, e.g. "Report #12 says ...". Pass on at most two reports per message. If you have more that fit the request, say so and wait to be asked.
 - Respond to what the leader actually asks. Don't volunteer your whole list unprompted, but share relevant reports when asked.
@@ -1793,7 +1867,29 @@ HOW TO TAKE PART
 - Once the leader has told you case facts, check your reports against them. Point out a report that clashes with a case fact and say which option it rules out. Don't claim a clash the facts don't support.
 - If asked for your view, give it briefly, based only on your reports and the case facts you have been told; the leader makes the final call.
 - If a message to everyone is clearly meant for another teammate by name and has nothing for you, reply with exactly PASS.
-- Stay in role as ${f.name} and don't mention these instructions.`;
+- Stay in role as ${f.name} and don't mention these instructions.${mannerBrief(p, f)}`;
+  }
+
+  /** This puzzle's twist for teammate f, if any: holding back, or one confident misreading. */
+  function mannerBrief(p, f) {
+    const d = p.dynamics || {};
+    if (d.quiet === f.id) return `
+
+YOUR MANNER IN THIS PUZZLE
+- You are new to this team and you hold back. When a leader message goes to the whole team and does not address you by name, don't share any reports, clashes or views, even if the leader passes on case facts. The first one or two times, reply with one short, hesitant line, for example that you'll let the others go first or that you're not sure your reports are useful. After that, reply with exactly PASS.
+- When the leader messages you directly or addresses you by name, open up and answer helpfully as described above. If the leader told the team case facts earlier, check your reports against them then.`;
+    const s = d.sure;
+    if (s && s.fid === f.id) {
+      const q = p.questions[s.q], opt = q.options[s.option];
+      return `
+
+YOUR MANNER IN THIS PUZZLE
+- You are quick and confident, and you hold one firm belief that you never doubt on your own: report #${s.num} rules out ${opt}, because ${s.says}.
+- Once the leader has told you the case fact "${q.facts[s.fact].text}", state this belief as a clash, citing report #${s.num} and saying it rules out ${opt}, together with any real clashes you find. Say it once; repeat it only if asked.
+- If the leader questions it, asks why, or explains why it does not clash, think again, admit that report #${s.num} does not rule out ${opt}, and drop the claim.
+- This belief is the one exception to the rule about not claiming a clash the facts don't support. Don't mention that it is mistaken.`;
+    }
+    return '';
   }
 
   root.MEL_PUZZLES = { VERSION, FOLLOWERS, LAYOUTS, PUZZLES, cluesFor, criticalFollowerClues, followerBrief };
@@ -2190,6 +2286,35 @@ HOW TO TAKE PART
         if (stillHidden) tip('offer', 3 + stillHidden, `${nameOf(fid)} offered to share more, but you didn't follow up. ${nameOf(fid)} still held ${stillHidden === 1 ? 'a decisive report' : stillHidden + ' decisive reports'}.`);
       });
       if (opts.timeLeft >= 60 && missed.length && !perQ.every(x => x.actual >= 99.5)) tip('early', 2, `You submitted with ${Math.floor(opts.timeLeft / 60)}:${String(Math.round(opts.timeLeft % 60)).padStart(2, '0')} left while ${missed.length === 1 ? 'a decisive report was' : missed.length + ' decisive reports were'} still hidden.`);
+
+      // the puzzle's twist: a teammate who holds back, or one who claims a clash that isn't there
+      const dyn = p.dynamics || {};
+      if (dyn.quiet) {
+        const qf = dyn.quiet, nm = nameOf(qf), held = critical.filter(c => c.holder === qf), got = held.filter(c => surfaced.has(c.num));
+        // held back: the leader wrote to everyone without naming this teammate at least once
+        const heldBack = leaderMsgs.some(x => !x.direct && x.aud.includes(qf));
+        metrics.quiet = { fid: qf, held: held.length, surfaced: got.length, asked: askedDirect.has(qf), heldBack };
+        if (held.length && heldBack) {
+          metrics.challenge = { kind: 'quiet', fid: qf, met: got.length === held.length };
+          if (got.length === held.length) good('quiet', 12, `${nm} held back when you wrote to everyone. You turned to ${nm} directly and drew out ${listText(got.map(c => '#' + c.num))}. Quiet teammates often hold what the team is missing.`);
+          else if (!askedDirect.has(qf)) tip('quiet', 7 + 2 * (held.length - got.length), `${nm} held back whenever you wrote to everyone and never passed on ${held.length - got.length === 1 ? 'a decisive report' : NUM[held.length - got.length] + ' decisive reports'}. When a teammate says little, ask them by name: quiet teammates often hold what the team is missing.`);
+        }
+      }
+      if (dyn.sure) {
+        const s = dyn.sure, nm = nameOf(s.fid), opt = optName(s.q, s.option);
+        // the teammate cites the misread report and says it rules the option out (a concession doesn't count)
+        const claimed = messages.some(m => m.from === s.fid && reportNums(m.text).includes(s.num) &&
+          /\brul(?:e|es|ed|ing)\s+(?:\w+\s+){0,2}out\b|\bexclud|\bdrop\b|\bcan'?t be\b/i.test(m.text) && !/\b(?:doesn'?t|does not|not|isn'?t|no longer)\s+(?:actually\s+)?(?:rule|clash)|stays in|after all/i.test(m.text) &&
+          optionMentions(p, m.text).some(o => o.q === s.q && o.k === s.option));
+        const kept = +answers[s.q][s.option] > 0;
+        metrics.claim = { fid: s.fid, made: claimed, kept };
+        if (claimed) {
+          metrics.challenge = { kind: 'sure', fid: s.fid, met: kept };
+          const cost = Math.round(100 - S.credenceScore(S.correctDist(p.questions[s.q].answer.filter(k => k !== s.option), 5), S.correctDist(p.questions[s.q].answer, 5)));
+          if (kept) good('checked', 12, `${nm} said report #${s.num} rules out ${opt}. You didn't take it on trust and kept ${opt}, which was right: ${s.why}`);
+          else tip('swayed', 9, `${nm} said report #${s.num} rules out ${opt}, and you ruled it out. It doesn't: ${s.why} ${opt} was one of the right answers on Q${s.q + 1}, so taking the claim on trust cost up to ${cost} points. When a teammate says a report rules an option out, check it against the case file yourself.`);
+        }
+      }
     }
     // using the reports: the same checks for solo and team puzzles
     perQ.forEach((x, qi) => {
@@ -2197,7 +2322,7 @@ HOW TO TAKE PART
         const refs = listText(kp.refs.map(n => (p.solo ? '#' + n : ref(n)))) + (kp.refs.length > 1 ? ' together' : '');
         tip('kept', 2 + kp.pct / 6, (p.solo ? `The reports rule out ${optName(qi, kp.k)} (${refs})` : `You had what you needed to rule out ${optName(qi, kp.k)} (${refs})`) + `, but you still gave it ${kp.pct}%.`);
       });
-      x.dropped.slice(0, 1).forEach(k => tip('dropped', 4, `You ruled out ${optName(qi, k)}, but no report rules it out: it was one of the right answers on Q${qi + 1}.`));
+      x.dropped.filter(k => !(metrics.claim && metrics.claim.made && p.dynamics.sure.q === qi && p.dynamics.sure.option === k)).slice(0, 1).forEach(k => tip('dropped', 4, `You ruled out ${optName(qi, k)}, but no report rules it out: it was one of the right answers on Q${qi + 1}.`));
       if (x.uneven && !x.kept.length && !x.dropped.length) tip('uneven', 2, `On Q${qi + 1} you gave unequal shares to options that no report ${p.solo ? '' : 'you saw '}separated. When the reports can't tell options apart, equal shares score best.`);
     });
     const perfect = perQ.every(x => x.actual >= 99.5);
@@ -2235,7 +2360,9 @@ HOW TO TAKE PART
       allAsked: team.filter(r => r.analysis.metrics.askedDirect.length === FOL.length).length,
       allSurfaced: team.filter(r => r.analysis.metrics.critical && r.analysis.metrics.surfaced === r.analysis.metrics.critical).length,
       quickPuzzles: team.filter(r => quickDone(r.analysis.metrics)).length, puzzles: n,
-      contextPuzzles: team.filter(r => r.analysis.metrics.contextShared).length
+      contextPuzzles: team.filter(r => r.analysis.metrics.contextShared).length,
+      // the puzzles' twists the leader ran into, and whether they handled them
+      challenges: team.filter(r => r.analysis.metrics.challenge).map(r => Object.assign({ puzzle: r.title }, r.analysis.metrics.challenge))
     };
     const quickMax = Math.max(0, ...team.filter(r => quickDone(r.analysis.metrics)).map(r => r.analysis.metrics.asksToAll));
     // strongest instance of each kind of observation, labelled with its puzzle
@@ -2261,10 +2388,14 @@ HOW TO TAKE PART
       }
       if (o.key === 'all-asked') { o.text = `You asked all three teammates directly in ${totals.allAsked} of ${n} team puzzles.`; o.weight = 1 + totals.allAsked; o.puzzle = null; }
       if (o.key === 'connect' && totals.connectsTotal > 1) o.weight += totals.connectsTotal;
+      if (o.key === 'quiet' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate held back when you wrote to everyone, and each time you turned to them directly and drew out what they held.`; o.puzzle = null; }
+      if (o.key === 'checked' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate claimed a report rules out an option that it doesn't, and each time you checked instead of taking it on trust.`; o.puzzle = null; }
       if (o.key === 'context' && totals.contextPuzzles > 1) { o.text = `You told your teammates what the case file says in ${totals.contextPuzzles === n ? (n === 2 ? 'both' : 'all ' + n) : totals.contextPuzzles + ' of ' + n} team puzzles, so they could judge which of their reports rule an option out.`; o.weight += totals.contextPuzzles; o.puzzle = null; }
     });
     tips.forEach(o => {
       if (o.key === 'no-context' && o.count > 1) { o.text = `In ${o.count} team puzzles you didn't tell your teammates what the case file says. Only you had it, so they couldn't tell which of their reports rule an option out. Passing on the case facts lets them pick out the decisive ones.`; o.puzzle = null; }
+      if (o.key === 'swayed' && o.count > 1) { o.text = `In ${o.count} team puzzles you ruled out an option because a teammate said a report rules it out, and it didn't. When a teammate claims a clash, check the report against the case file yourself.`; o.puzzle = null; }
+      if (o.key === 'quiet' && o.count > 1) { o.text = `In ${o.count} team puzzles a quiet teammate held back when you wrote to everyone, and their decisive reports stayed hidden. When a teammate says little, ask them by name.`; o.puzzle = null; }
       if (o.key === 'repeats' && o.count > 1) { o.text = `Across the test, ${totals.repeatsTotal} of your questions repeated an earlier one, such as “${o.example}”. ${REPEAT_ADVICE}`; o.puzzle = null; }
     });
     const pick = (xs, k) => xs.sort((a, b) => b.weight - a.weight).slice(0, k);
@@ -2293,8 +2424,24 @@ HOW TO TAKE PART
       { label: 'Drawing out hidden clues', value: `${T.surfaced} of ${T.critical} decisive clues`, rating: rate(T.critical ? T.surfaced / T.critical : NaN, 0.75, 0.4), note: 'Weak leaders learned little from their team: their answers looked like uninformed guesses.' }
     ];
   }
-  /** A playful leadership style from the habits: { name, text }. Every claim in the text rests on behaviour seen in the chat. */
+  /** A playful leadership style from the habits: { name, text }. Every claim in the text rests on behaviour seen in the chat.
+   * The puzzles' twists add a sentence: how the leader dealt with a quiet teammate or a wrong claim. */
   function leaderStyle(hb, T) {
+    const st = baseStyle(hb, T), ch = T.challenges || [];
+    const missedQuiet = ch.some(c => c.kind === 'quiet' && !c.met), swayed = ch.some(c => c.kind === 'sure' && !c.met);
+    const handled = ch.length && ch.every(c => c.met);
+    let add = '';
+    if (swayed && missedQuiet) add = 'Two things to watch: a quiet teammate kept what they knew, and you took a teammate\'s wrong claim on trust.';
+    else if (swayed) add = 'One thing to watch: you took a teammate\'s wrong claim on trust. Check claims against the case file.';
+    else if (missedQuiet) add = 'One thing to watch: a quiet teammate kept what they knew. Ask the quiet ones by name.';
+    else if (handled) {
+      const kinds = new Set(ch.map(c => c.kind));
+      add = kinds.size > 1 ? 'You also handled the teammates who made it harder: you drew out the quiet one and checked the overconfident one.'
+        : kinds.has('quiet') ? 'You also noticed the teammate who held back and drew them out.' : 'You also checked the teammate who claimed too much instead of taking it on trust.';
+    }
+    return add ? { name: st.name, text: st.text + ' ' + add } : st;
+  }
+  function baseStyle(hb, T) {
     const [q, t, i] = hb.map(x => x.rating), general = !(T.targetedShare >= 0.35);
     const complete = T.critical > 0 && T.surfaced === T.critical;
     const briefed = T.contextPuzzles > 0 && T.contextPuzzles >= T.puzzles / 2;
@@ -2330,8 +2477,9 @@ HOW TO TAKE PART
  * simple rules (who is addressed, options, report numbers, topics, case facts, requests for more or
  * for a view) and pass on their reports a couple at a time, as the LLM teammates are briefed to
  * (followerBrief). Like them, they can't tell which of their reports rule an option out until the
- * leader tells them the case facts. Each has a slightly different voice. Deterministic, so the Node
- * tests can check them. */
+ * leader tells them the case facts. Each has a slightly different voice. A puzzle's twist (puzzles.js,
+ * dynamics) makes one of them hold back in replies to everyone, or claim one clash that isn't there.
+ * Deterministic, so the Node tests can check them. */
 (function (root) {
   'use strict';
   const PZ = root.MEL_PUZZLES || require('./puzzles.js');
@@ -2346,7 +2494,9 @@ HOW TO TAKE PART
       hi: 'Hi! Ready.', ok: ['OK.', 'Got it.', 'Noted.'], ack: 'Agreed.',
       view: 'Going by my report #{n}, I would rule out {o}. Beyond that it is your call.', noView: 'My reports do not settle it. Your call.',
       clash: 'Then #{n} rules out {o}: {t}', noClash: 'None of my reports clashes with that.',
-      needCase: 'I can\'t tell which of mine rule anything out without the case details. What does the case file say?'
+      needCase: 'I can\'t tell which of mine rule anything out without the case details. What does the case file say?',
+      shy: ['I will let the others go first.', 'Not sure mine are useful. The others seem to have it covered.'],
+      sure: 'Easy one: #{n} rules out {o}. {t}.', concede: 'Fair point. #{n} does not actually clash with the case file, so {o} stays in.'
     },
     f2: { // Theo: chatty
       share: ['Good question. Report #{n} says: {t}', 'Oh, I have one on that. #{n}: {t}', 'Yes! #{n}: {t}'],
@@ -2356,7 +2506,9 @@ HOW TO TAKE PART
       hi: 'Hey! Happy to help.', ok: ['Sure thing.', 'Will do.', 'Makes sense.'], ack: 'Sounds right to me.',
       view: 'My report #{n} says we can drop {o}. The rest I can\'t judge from my side.', noView: 'Honestly, nothing in my reports settles it.',
       clash: 'Oh, that matters! Report #{n} rules out {o}: {t}', noClash: 'Hmm, none of mine clash with that.',
-      needCase: 'Honestly, I can\'t tell which ones matter without knowing more about the case. What do we know?'
+      needCase: 'Honestly, I can\'t tell which ones matter without knowing more about the case. What do we know?',
+      shy: ['Oh, I\'ll let the others go first.', 'Hmm, I\'m not sure mine matter much. The others probably know better.'],
+      sure: 'Oh, that settles one! #{n} rules out {o}, no doubt about it: {t}.', concede: 'Ah, you\'re right, I jumped the gun. #{n} doesn\'t clash with anything, so {o} stays in.'
     },
     f3: { // Jonas: careful
       share: ['I think #{n} is relevant: {t}', 'Report #{n}: {t}', 'Let me check... #{n}: {t}'],
@@ -2366,7 +2518,9 @@ HOW TO TAKE PART
       hi: 'Hello. Ready when you are.', ok: ['Understood.', 'OK, noted.', 'Right.'], ack: 'That matches what I have.',
       view: 'Based on report #{n}, {o} looks ruled out. I\'m not sure about the others.', noView: 'I can\'t tell from my reports, sorry.',
       clash: 'Given that, I think #{n} rules out {o}: {t}', noClash: 'I don\'t think any of my reports clashes with that.',
-      needCase: 'I\'m not sure. Whether a report rules something out depends on the case, and I haven\'t seen the case file.'
+      needCase: 'I\'m not sure. Whether a report rules something out depends on the case, and I haven\'t seen the case file.',
+      shy: ['I\'ll let the others go first, if that\'s OK.', 'I\'m not sure mine are useful. I\'ll leave it to the others.'],
+      sure: 'Then #{n} definitely rules out {o}: {t}.', concede: 'You\'re right, I misread it. #{n} doesn\'t rule out {o} after all.'
     }
   };
   const OPINION = /\b(what do you think|what'?s your (view|take|guess|opinion)|your (view|opinion|take|guess)|do you agree|which (one|option)s? (is|are|would|do|should)|should we|any (ideas|thoughts|hunches)|thoughts\b|best guess)/i;
@@ -2374,6 +2528,7 @@ HOW TO TAKE PART
   const ALL = /\b(all|every|everything|anything|what (do|did) you (have|know|got|see)|what have you got|your (reports?|clues?|info|information|notes)|share|send|list|tell (me|us))\b/i;
   const RULE = /\b(rul\w*\s+(?:\w+\s+)?out|exclud\w*|eliminat\w*|decisive|clash\w*)\b/i;
   const GREET =/^\s*(hi|hello|hey|hiya|good (morning|afternoon|evening))\b/i;
+  const DOUBT = /\b(sure|really|why|how so|certain|doesn'?t|does not|don'?t|not|isn'?t|is not|wrong|mistake|check|explain|enough|minimum|maximum|at least|so what)\b/i;
   const THANKS = /^\s*(thanks|thank you|thx|great|perfect|ok|okay|got it|cool|nice|good|noted|understood|brilliant|super)\b/i;
   const pick = (x, n) => (Array.isArray(x) ? x[n % x.length] : x);
   const fill = (tpl, cl) => tpl.replace('{n}', cl.num).replace('{t}', cl.text);
@@ -2393,6 +2548,13 @@ HOW TO TAKE PART
     // addressed to someone else by name ("Theo, …"); merely mentioning Theo is still for everyone
     if (!direct && !C.audienceOf(latest).includes(fid)) return '';
     const text = incoming.map(m => m.text).join('\n');
+    const dyn = p.dynamics || {}, own = messages.filter(m => m.from === fid).map(m => m.text);
+    // a quiet teammate holds back unless messaged directly or addressed by name: a hesitant line or two, then silence
+    const quiet = dyn.quiet === fid;
+    if (quiet && !direct && !incoming.some(m => C.sentences(m.text).some(x => C.vocatives(x).has(fid)))) {
+      const hedges = own.filter(t => V.shy.includes(t)).length;
+      return hedges < V.shy.length ? V.shy[hedges] : '';
+    }
     const mine = PZ.cluesFor(p, fid);   // by report number: a teammate doesn't know which of its reports the others also have
     const v = C.vocab(p);
     const topics = new Set(C.tokens(text).filter(t => v.specific.has(t)));
@@ -2418,17 +2580,39 @@ HOW TO TAKE PART
     const newFacts = C.factMentions(p, text).filter(f => !before.has(factKey(f)));
     const known = new Set([...before, ...newFacts.map(factKey)]);
     const clashes = mine.filter(cl => cl.kind === 'out' && known.has(cl.q + ':' + cl.fact));
+    // an overconfident teammate also claims a clash that isn't there, once it knows the case fact it misreads,
+    // and drops the claim when the leader questions it
+    const sure = dyn.sure && dyn.sure.fid === fid ? dyn.sure : null;
+    let claim = null;
+    if (sure && known.has(sure.q + ':' + sure.fact)) {
+      const said = t => C.reportNums(t).includes(sure.num) && /\brules? out\b/i.test(t) && !/stays in|after all|not actually|doesn'?t (clash|rule)/i.test(t);
+      const made = own.some(said), conceded = own.some(t => C.reportNums(t).includes(sure.num) && /stays in|after all|not actually|doesn'?t (clash|rule)/i.test(t));
+      if (!conceded) {
+        const opt = p.questions[sure.q].options[sure.option];
+        // questioned: the claim's report, option or reasoning comes up with a doubt, or a doubt answers the claim straight away
+        const claimToks = new Set(C.tokens(sure.says + ' ' + p.clues.find(c => c.num === sure.num).text));
+        const about = nums.includes(sure.num) || opts.some(o => o.q === sure.q && o.k === sure.option) || C.tokens(text).some(t => claimToks.has(t)) || said(own[own.length - 1] || '');
+        const challenged = made && about && DOUBT.test(text);
+        if (challenged) return V.concede.replace('{n}', sure.num).replace('{o}', opt);
+        claim = { num: sure.num, q: sure.q, rules: [sure.option], claim: true, made, text: sure.says, opt };
+      }
+    }
     const tellClashes = () => {
-      const fresh = clashes.filter(cl => !shared.has(cl.num)), now = fresh.slice(0, 2);
+      const fresh = clashes.filter(cl => !shared.has(cl.num));
+      if (claim && !claim.made) fresh.unshift(claim);
+      const now = fresh.slice(0, 2);
       if (!now.length) return clashes.length ? V.doneTopic : V.noClash;
-      now.forEach(cl => shared.add(cl.num));
-      return now.map((cl, k) => (k ? `Also #${cl.num} rules out ${optName(cl)}: ${cl.text}` : V.clash.replace('{n}', cl.num).replace('{o}', optName(cl)).replace('{t}', cl.text))).join(' ') +
+      now.forEach(cl => { if (!cl.claim) shared.add(cl.num); });
+      return now.map((cl, k) => cl.claim ? (k ? `Also #${cl.num} rules out ${cl.opt}: ${cl.text}.` : V.sure.replace('{n}', cl.num).replace('{o}', cl.opt).replace('{t}', cl.text))
+        : k ? `Also #${cl.num} rules out ${optName(cl)}: ${cl.text}` : V.clash.replace('{n}', cl.num).replace('{o}', optName(cl)).replace('{t}', cl.text)).join(' ') +
         (fresh.length > 2 ? ' ' + V.more : '');
     };
     // 0. new case facts: check the reports against them. Asked which reports rule something out:
     // without case facts there is no way to tell.
     if (newFacts.length) return tellClashes();
     if (RULE.test(text)) return known.size ? tellClashes() : V.needCase;
+    // drawn out at last, a quiet teammate checks its reports against the case facts it heard earlier
+    if (quiet && known.size && clashes.some(cl => !shared.has(cl.num)) && !nums.length && !opts.length) return tellClashes();
 
     // 1. report numbers
     if (nums.length) {
@@ -2454,10 +2638,10 @@ HOW TO TAKE PART
     }
     // 3. a view on the answer
     if (OPINION.test(text)) {
-      const outs = clashes.filter(cl => qMention == null || cl.q === qMention);
+      const outs = (claim ? [claim] : []).concat(clashes).filter(cl => qMention == null || cl.q === qMention);
       if (!outs.length) return known.size ? V.noView : V.needCase;
-      shared.add(outs[0].num);
-      return V.view.replace('{n}', outs[0].num).replace('{o}', optName(outs[0]));
+      if (!outs[0].claim) shared.add(outs[0].num);
+      return V.view.replace('{n}', outs[0].num).replace('{o}', outs[0].claim ? outs[0].opt : optName(outs[0]));
     }
     // 4. greetings and thanks
     if (!asked && GREET.test(text)) return V.hi;
@@ -3286,6 +3470,14 @@ HOW TO TAKE PART
   // On localhost, ?hosted=<url> points at a local stand-in (worker/dev-server.mjs) instead.
   const HOSTED_DEPLOYED = 'https://manager-effect-lab-teammates.ludek-stehlik.workers.dev/reply';
   const HOSTED_URL = (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).get('hosted')) || HOSTED_DEPLOYED;
+  // Pilot data through the same worker: anonymous counts of tests started and finished, and results that a
+  // player chooses to send at the end. Not from claude.ai, whose pages cannot reach the worker.
+  const PILOT_URL = !inClaude && HOSTED_URL ? HOSTED_URL.replace(/\/reply$/, '') : '';
+  function pilotEvent(ev) {
+    if (!PILOT_URL) return;
+    try { fetch(PILOT_URL + '/event', { method: 'POST', keepalive: true, headers: { 'content-type': 'text/plain' }, body: JSON.stringify(Object.assign({ v: PZ.VERSION }, ev)) }).catch(() => {}); }
+    catch (e) { /* counting is best effort */ }
+  }
   const SCR = window.MEL_SCRIPTED, COACH = window.MEL_COACH;
   const FOL = PZ.FOLLOWERS;
   const folName = id => (FOL.find(f => f.id === id) || { name: 'You' }).name;
@@ -3296,11 +3488,15 @@ HOW TO TAKE PART
     standard: { label: 'Standard', time: 'about 20–25 min', desc: '1 warm-up and 4 team puzzles', warmups: 1, team: ['t1', 't2', 't3', 't4'] },
     extended: { label: 'Extended', time: 'about 40–45 min', desc: '3 warm-ups and 6 team puzzles, as in the study', warmups: 3, team: null }
   };
+  /** The length a puzzle order was built from ('custom' if none matches). */
+  const teamCount = order => order.filter(id => (PZ.PUZZLES.find(p => p.id === id) || { solo: true }).solo !== true).length;
+  const lengthOf = order => Object.keys(LENGTHS).find(k => LENGTHS[k].warmups === order.length - teamCount(order) &&
+    (LENGTHS[k].team ? LENGTHS[k].team.length : PZ.PUZZLES.filter(p => !p.solo).length) === teamCount(order)) || 'custom';
 
   const AI = {
     sample: null, sampleState: inClaude ? 'checking' : 'absent',
     settings: Object.assign({ engine: inClaude ? 'claude' : HOSTED_URL ? 'hosted' : 'scripted', model: 'claude-opus-5-5', minutes: 6, name: '', remember: false, apiKey: '', geminiKey: '' }, store.get('ai.settings', {})),
-    phase: 'intro', order: [], idx: 0, results: [], cur: null, notice: '',
+    phase: 'intro', order: [], idx: 0, results: [], cur: null, notice: '', survey: { fun: null, fair: null, comment: '', sent: false },
     root: () => $('#ai-root')
   };
   if (!AI.settings.remember) { AI.settings.apiKey = ''; AI.settings.geminiKey = ''; }
@@ -3403,7 +3599,7 @@ HOW TO TAKE PART
       h('div', { class: 'btn-row' },
         pending ? h('button', { class: 'btn primary', type: 'button', disabled: resumeWait || null, onclick: resumeTest }, resumeWait ? 'Checking Claude…' : 'Resume your test') : '',
         startBtn(),
-        last && !pending ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''),
+        last && !pending ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.order = last.order || last.results.map(r => r.id); AI.survey = last.survey || { fun: null, fair: null, comment: '', sent: false }; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''),
       h('p', { class: 'small muted' }, free ? 'No sign-up and no key. ' : '', pending ? 'You have an unfinished test saved in this browser. Starting a new test replaces it.' : 'You can stop after any team puzzle and still get your result. If you leave mid-test, your progress is saved in this browser and you can resume.'),
       more);
     put(root,
@@ -3418,11 +3614,11 @@ HOW TO TAKE PART
         setup,
         h('div', { class: 'panel prose' }, h('h3', {}, 'How it works'),
           h('ol', {},
-            h('li', {}, h('strong', {}, 'Lead the team. '), 'In each team puzzle you hold the case file and 8 reports; each teammate holds 8 more, half of them shared. Only you see the case file, so on their own your teammates can\'t tell which of their reports matter. Message everyone or one person. Teammates only talk to you.'),
+            h('li', {}, h('strong', {}, 'Lead the team. '), 'In each team puzzle you hold the case file and 8 reports; each teammate holds 8 more, half of them shared. Only you see the case file, so on their own your teammates can\'t tell which of their reports matter. Message everyone or one person. Teammates only talk to you, and like real teammates they differ: some hold back, some are surer than they should be.'),
             h('li', {}, h('strong', {}, 'Answer with probabilities. '), 'Each puzzle has two questions with five options. Each report is a fact about one option, and it rules that option out when it clashes with the case file; the options left standing are equally likely. Spread 100 points across them.'),
             h('li', {}, h('strong', {}, 'Get feedback on what you did. '), 'After each puzzle: which questions drew out decisive reports, which reports stayed hidden and who held them, and where your points went.'),
             h('li', {}, h('strong', {}, 'See how you led. '), 'Your score, the leadership habits the study linked to better team results, a playful leadership style, and a result card to share.')),
-          h('p', { class: 'small muted' }, 'Standard and Extended start with solo warm-ups, where you see every report; they show how you reason on your own. Scores run from 0 to 100 (100 = exactly the right distribution; an even split scores 20–80). Results stay in your browser. AI teammates receive only your chat messages; scripted teammates run entirely in your browser.'))),
+          h('p', { class: 'small muted' }, 'Standard and Extended start with solo warm-ups, where you see every report; they show how you reason on your own. Scores run from 0 to 100 (100 = exactly the right distribution; an even split scores 20–80). Your results stay in your browser unless you choose to send them at the end, without your name or chat. The page counts anonymously how many tests are started and finished, with no chat and no personal data. AI teammates receive only your chat messages; scripted teammates run entirely in your browser.'))),
       h('details', { class: 'panel', id: 'ai-group-wrap', open: AI.group.leaders.length ? true : null },
         h('summary', { class: 'group-summary' }, h('strong', {}, 'For teams and researchers: compare a group of test takers')),
         h('div', { class: 'flow', id: 'ai-group', style: { marginTop: '14px' } }))
@@ -3468,6 +3664,7 @@ HOW TO TAKE PART
     const input = h('input', { type: 'file', id: 'ai-files', accept: '.csv,.txt,text/csv', multiple: true, hidden: true, onchange: e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) readGroupFiles(f); } });
     const head = [
       h('p', { class: 'small' }, 'One person\'s raw score mixes leadership with how well they reason alone. To separate the two, collect the results files (CSV) of several people who took the same version of the test with the same teammates. The analysis standardises each team puzzle across the group, removes the part predicted by the solo warm-up, and shrinks each person\'s estimate toward the group average in proportion to its noise, following models (1)–(3) of Study 2. Everyone leads the same AI teammates, so there is no teammate skill to adjust for.'),
+      h('p', { class: 'small' }, 'Running a pilot? Real results files also get a pilot overview first: how many finished, how they rated fun and fairness, and whether scores and styles spread out or pile up at the top.'),
       h('div', { class: 'btn-row' }, h('label', { class: 'btn', for: 'ai-files' }, 'Choose results files'), input,
         h('button', { class: 'btn quiet', type: 'button', onclick: loadGroupExample }, 'Load simulated example'),
         G.leaders.length ? h('button', { class: 'btn quiet', type: 'button', onclick: () => { AI.group = { leaders: [], files: [], key: null, isExample: false, truth: null, notes: [] }; renderGroup(); } }, 'Clear') : ''),
@@ -3482,9 +3679,10 @@ HOW TO TAKE PART
       h('p', { class: 'note warn' }, 'These results come from different teammates or test versions. Scores from different AI models or versions are not comparable, so analyse one set at a time.'),
       h('div', { class: 'field', style: { maxWidth: '420px' } }, h('label', { for: 'ai-group-key' }, 'Analyse'),
         h('select', { id: 'ai-group-key', onchange: e => { G.key = e.target.value; renderGroup(); } }, [...counts.entries()].map(([k, n]) => h('option', { value: k, selected: k === G.key }, `${groupLabel(k)} (${n} ${n === 1 ? 'person' : 'people'})`))))));
+    const pool = G.leaders.filter(l => groupKey(l) === G.key), overview = G.isExample ? '' : pilotOverview(S.pilotSummary(pool));
     let res;
-    try { res = S.aiGroup(G.leaders.filter(l => groupKey(l) === G.key), { level: 0.95 }); }
-    catch (e) { put(box, head, h('p', { class: 'note warn' }, e.message)); return; }
+    try { res = S.aiGroup(pool, { level: 0.95 }); }
+    catch (e) { put(box, head, overview, h('h4', {}, 'Leadership estimates'), h('p', { class: 'note warn' }, e.message)); return; }
     AI.group.result = res;
     const fit = res.fit, adj = res.useSolo;
     const c = { above: 0, below: 0, unclear: 0 }; res.people.forEach(p => c[p.cls]++);
@@ -3502,13 +3700,42 @@ HOW TO TAKE PART
       h('td', {}, p.id), h('td', { class: 'num' }, Math.round(p.score)), h('td', { class: 'num' }, isFinite(p.solo) ? Math.round(p.solo) : '–'),
       h('td', { class: 'num' }, fmtS(p.eb, 2)), h('td', { class: 'num' }, `${fmtS(p.lo, 2)} to ${fmtS(p.hi, 2)}`), h('td', { class: 'num' }, p.pct),
       h('td', {}, h('span', { class: 'pill ' + (p.cls === 'above' ? 'pos' : p.cls === 'below' ? 'neg' : '') }, h('span', { class: 'dot' }), p.cls === 'above' ? 'Above average' : p.cls === 'below' ? 'Below average' : 'Can\'t tell'))));
-    put(box, head,
+    put(box, head, overview, overview ? h('h4', {}, 'Leadership estimates') : '',
       res.warnings.length ? h('p', { class: 'note warn' }, res.warnings.join(' ')) : '',
       G.isExample ? h('p', { class: 'note example' }, h('strong', {}, 'Example data. '), 'Forty simulated people. Load your own results files to replace them.') : '',
       tiles, verdict, truth,
       h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Person', 'Team score (raw)', 'Solo score', adj ? 'Leadership estimate (SD)' : 'Total estimate (SD)', '95% interval', 'Percentile', 'Classification'].map((t, i) => h('th', { class: i && i < 6 ? 'num' : '' }, t)))), h('tbody', {}, rows))),
       h('p', { class: 'small muted' }, 'Team and solo scores are 0–100 means. Each estimate is the person\'s average puzzle score, standardised within puzzle' + (adj ? ' and net of solo skill' : '') + ', pulled toward zero in proportion to its noise (empirical Bayes). "Can\'t tell" means the 95% interval includes the group average.'),
       h('div', { class: 'btn-row' }, h('button', { class: 'btn', type: 'button', onclick: exportGroup }, 'Download estimates (CSV)')));
+  }
+  /** Pilot overview: before building more, check that people finish, enjoy it, find it fair, and spread out. */
+  function pilotOverview(P) {
+    if (!P.n) return '';
+    const big = Math.max(1, ...P.bins.map(b => b.n));
+    const rating = r => (r.n ? `${fmt(r.mean, 1)} / 5` : '–');
+    const FLAG = {
+      ceiling: `${Math.round(100 * P.topShare)}% scored 95 or more. If most people reach the top, the test cannot tell leaders apart: make the puzzles harder before adding features.`,
+      narrow: `Scores spread little (SD ${fmt(P.sd, 1)} points), so differences between people are small next to the noise of a few puzzles.`,
+      'one-style': `Most people got the same style (${P.styles[0] && P.styles[0].name}): many seem to find the same routine.`,
+      unfair: `${P.fair.low} of ${P.fair.n} rated the feedback's fairness 2 or lower. Read their comments before trusting the feedback rules.`
+    };
+    const tiles = h('div', { class: 'stats' },
+      h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Finished every puzzle'), h('span', { class: 'value' }, P.finished.n ? `${P.finished.all} of ${P.finished.n}` : '–'), h('span', { class: 'sub' }, P.finished.n ? 'of those whose file records it' : 'not in these files')),
+      h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Enjoyment'), h('span', { class: 'value' }, rating(P.fun)), h('span', { class: 'sub' }, `${P.fun.n} rated`)),
+      h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Fair feedback'), h('span', { class: 'value' }, rating(P.fair)), h('span', { class: 'sub' }, `${P.fair.n} rated`)),
+      h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Team score'), h('span', { class: 'value' }, isFinite(P.median) ? Math.round(P.median) : '–'), h('span', { class: 'sub' }, isFinite(P.median) ? `median · middle half ${Math.round(P.q1)}–${Math.round(P.q3)} · range ${Math.round(P.min)}–${Math.round(P.max)}` : '')),
+      P.twists.total ? h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Teammate twists handled'), h('span', { class: 'value' }, `${P.twists.met} of ${P.twists.total}`), h('span', { class: 'sub' }, 'quiet teammates drawn out, wrong claims checked')) : '');
+    const hist = h('div', { role: 'img', 'aria-label': 'Team scores of ' + P.scored + ' people in bands of 10 points: ' + P.bins.map(b => `${b.lo}–${b.hi}: ${b.n}`).join(', ') },
+      h('div', { class: 'pilot-hist' }, P.bins.map(b => h('div', { class: 'bin' }, b.n ? String(b.n) : '', h('i', { style: { height: Math.round(72 * b.n / big) + 'px' } })))),
+      h('div', { class: 'pilot-hist-axis', 'aria-hidden': 'true' }, P.bins.map(b => h('span', {}, b.lo === 90 ? '90+' : String(b.lo)))));
+    return h('div', { class: 'flow' },
+      h('h4', {}, 'Pilot overview'),
+      h('p', { class: 'small muted' }, 'Before building more, check four things: do people finish, do they enjoy it, does the feedback feel fair, and do their scores spread out? How many people started but never sent a file is not in these files; the hosted worker counts that (tools/pilot-export.mjs).'),
+      tiles,
+      h('div', {}, h('p', { class: 'small', style: { margin: '0 0 4px' } }, h('strong', {}, 'Team scores'), ` · ${P.scored} people, in bands of 10 points`), hist),
+      P.styles.length ? h('p', { class: 'small' }, h('strong', {}, 'Styles: '), P.styles.map(s => `${s.name} ${s.n}`).join(' · ')) : '',
+      P.flags.length ? h('ul', { class: 'obs-list next' }, P.flags.map(f => h('li', {}, FLAG[f]))) : (P.scored >= 5 ? h('p', { class: 'small' }, 'No warning signs: scores spread out and the feedback is not rated unfair.') : ''),
+      P.comments.length ? h('details', { class: 'map' }, h('summary', {}, `Comments (${P.comments.length})`), h('ul', { class: 'small' }, P.comments.map(c => h('li', {}, c)))) : '');
   }
   function exportGroup() {
     const res = AI.group.result; if (!res) return;
@@ -3637,7 +3864,8 @@ HOW TO TAKE PART
     if (AI.notice) { const n = $('#ai-notice'); if (n) n.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
     const L = LENGTHS[st.length] || LENGTHS.quick;
     AI.order = PZ.PUZZLES.filter(p => p.solo).slice(0, L.warmups).concat(PZ.PUZZLES.filter(p => !p.solo && (!L.team || L.team.includes(p.id)))).map(p => p.id);
-    AI.idx = 0; AI.results = [];
+    AI.idx = 0; AI.results = []; AI.survey = { fun: null, fair: null, comment: '', sent: false };
+    pilotEvent({ kind: 'start', length: st.length, engine: st.engine });
     startPuzzle();
   }
 
@@ -3769,7 +3997,7 @@ HOW TO TAKE PART
     // writes again while it is still coming in; otherwise the teammate's turn would look finished and the
     // newer message would never get an answer.
     const puzzleAt = c, at = c.seq + 0.5;
-    engineReply(fid, ctl.signal, text => { if (text && !/^PASS/i.test(text)) { bubble.classList.remove('typing'); bubbleText.textContent = text; scrollChat(); } })
+    engineReply(fid, ctl.signal, text => { if (text && !/^PASS\b/i.test(text)) { bubble.classList.remove('typing'); bubbleText.textContent = text; scrollChat(); } })
       .then(text => {
         if (AI.cur !== puzzleAt) return;
         text = cleanReply(text, fid);
@@ -3798,10 +4026,20 @@ HOW TO TAKE PART
         if (AI.phase === 'puzzle') saveProgress();
       });
   }
+  // Now and then a model writes out its checking and a draft before the message ("… Draft response: X. X'").
+  // Keep only what follows the last draft marker, and of a draft and its final version only the final one.
+  function stripDraft(t) {
+    const m = /^[\s\S]*\b(?:draft(?:ed)?|final)\s+(?:response|reply|message|answer)\s*:\s*/i.exec(t);
+    if (!m) return t;
+    t = t.slice(m[0].length).trim();
+    const head = t.slice(0, 24), j = t.length > 48 ? t.lastIndexOf(head) : -1;
+    return (j > 0 ? t.slice(j) : t).trim();
+  }
   function cleanReply(text, fid) {
     let t = String(text || '').trim();
     const nm = folName(fid);
     t = t.replace(new RegExp('^\\**' + nm + '\\**\\s*[:\\-–]\\s*', 'i'), '').replace(/^"(.*)"$/s, '$1').trim();
+    t = stripDraft(t);
     return /^PASS\b/i.test(t) ? '' : t;
   }
 
@@ -3994,6 +4232,7 @@ HOW TO TAKE PART
     const timeLeft = c.deadline ? Math.max(0, (c.deadline - Date.now()) / 1000) : null;
     const analysis = COACH.analyse(p, c.messages, c.answers, { timeLeft });
     AI.results.push({ id: p.id, version: PZ.VERSION, title: p.title, solo: !!p.solo, scores, flat, answers: c.answers.map(a => a.slice()), seconds: elapsed(), metrics: p.solo ? null : analysis.metrics, analysis, transcript: c.messages.slice(), engine: c.engine, model: c.engine === 'api' ? AI.settings.model : (c.engine === 'gemini' || c.engine === 'hosted') ? LLM.GEMINI_MODEL : null });
+    if (!p.solo) pilotEvent({ kind: 'puzzle', puzzle: p.id, engine: c.engine });
     AI.phase = 'feedback';
     saveProgress();
     AI.render();
@@ -4076,11 +4315,17 @@ HOW TO TAKE PART
 
   function finishTest() {
     AI.phase = 'summary';
-    store.set('ai.last', { results: AI.results, name: AI.settings.name, when: new Date().toISOString() });
+    const len = lengthOf(AI.order), last = AI.results[AI.results.length - 1];
+    if (len !== 'custom' && last) pilotEvent({ kind: 'finish', length: len, engine: last.engine, done: AI.results.filter(r => !r.solo).length });
+    AI.survey = AI.survey || { fun: null, fair: null, comment: '', sent: false };
+    saveLast();
     clearProgress();
     AI.render();
     window.scrollTo(0, 0);
   }
+
+  // the last finished test, with its puzzle order (how far the player got) and their pilot ratings
+  const saveLast = () => store.set('ai.last', { results: AI.results, order: AI.order, survey: AI.survey, name: AI.settings.name, when: new Date().toISOString() });
 
   function summaryNumbers(results) {
     results.forEach(ensureAnalysis);
@@ -4182,6 +4427,9 @@ HOW TO TAKE PART
           h('div', { class: 'style-box' }, h('span', { class: 'eyebrow' }, 'Your leadership style · for fun'), h('h3', {}, style.name), h('p', {}, style.text))),
         h('h3', {}, 'What you did, specifically'),
         obsLists(N.strengths, N.tips, 'What you did well', 'Try next time'),
+        N.challenges.length ? [h('h3', {}, 'Teammates who made it harder'),
+          h('ul', { class: 'twists' }, N.challenges.map(c => h('li', {}, h('span', { class: 'pill ' + (c.met ? 'pos' : 'neg') }, h('span', { class: 'dot' }), c.met ? 'Handled' : 'Missed'), h('span', {}, h('span', { class: 'obs-where' }, c.puzzle + ': '), twistText(c))))),
+          h('p', { class: 'small muted' }, 'As in real teams, some teammates hold back and some are surer than they should be. Drawing out a quiet teammate and checking a confident claim are leadership moves too, beyond asking the right questions.')] : '',
         h('h3', {}, 'Where your points went'),
         pointsSplit({ actual: N.teamScore, use: N.use, hidden: N.hidden }),
         h('p', { class: 'small muted' }, 'Points lost to reports that stayed hidden reflect leading: drawing out what your teammates knew. Points lost in using the reports you had reflect reasoning. A report counts as drawn out only when a teammate cited its number, so the hidden part can be overstated if teammates paraphrased.'),
@@ -4205,6 +4453,7 @@ HOW TO TAKE PART
           h('button', { class: 'btn quiet', type: 'button', onclick: () => copyText(text, shareStatus, 'Text copied.') }, 'Copy text'),
           shareStatus),
         h('p', { class: 'small muted' }, '"Share on LinkedIn" copies a short text for your post and opens LinkedIn with a link to this test. Attach the result card if you like. Nothing is shared until you post it.')),
+      pilotPanel(),
       h('div', { class: 'panel' }, h('h3', {}, 'Puzzle by puzzle'),
         h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Puzzle', 'Q1', 'Q2', 'Clues surfaced', 'Questions', 'Specific', 'Repeated', 'Follow-ups', 'Turns', 'Words', 'Time'].map((t, i) => h('th', { class: i ? 'num' : '' }, t)))), h('tbody', {}, rows))),
         h('p', { class: 'small muted' }, `Questions solved (score of 95 or more): ${N.solved} of ${N.nq} (${pct}%). Solo warm-up score: ${isFinite(N.soloScore) ? Math.round(N.soloScore) + ' (mean of ' + N.soloN + ' questions)' : 'skipped'}. "We" language: ${fmt(N.weRate, 1)} per 100 words.`)),
@@ -4238,14 +4487,65 @@ HOW TO TAKE PART
       '. There are no norms for this version, so it cannot say how you compare with the leaders in Study 2 or with other people.' +
       (N.soloN ? '' : ' Without a warm-up this result cannot be adjusted for reasoning skill in a group comparison; the Standard length includes one.');
   }
+  /** One results row: the CSV download, and what "Send anonymously" sends (without the name). */
+  function resultRow() {
+    const R = AI.results, N = summaryNumbers(R), sv = AI.survey || {};
+    const uniq = xs => [...new Set(xs.filter(Boolean))].join('+');
+    const style = N.team.length ? COACH.leaderStyle(COACH.habits(N), N).name : '';
+    const ch = N.challenges || [], kind = k => ch.filter(c => c.kind === k), frac = xs => (xs.length ? xs.filter(c => c.met).length + '/' + xs.length : '');
+    const row = { name: AI.settings.name || '', finished: new Date().toISOString(), test_version: R[0] && R[0].version || 1, engine: uniq(R.map(r => r.engine)), model: uniq(R.map(r => r.model)),
+      length: lengthOf(AI.order.length ? AI.order : R.map(r => r.id)), team_puzzles_planned: teamCount(AI.order.length ? AI.order : R.map(r => r.id)), team_puzzles_done: N.team.length,
+      team_score: fmt(N.teamScore, 2), team_score_low: fmt(N.teamLo, 2), team_score_high: fmt(N.teamHi, 2), questions_solved: N.solved, questions: N.nq, solo_score: fmt(N.soloScore, 2), solo_questions: N.soloN,
+      style, info_surfaced: N.surfaced, info_total: N.critical, twists_met: ch.filter(c => c.met).length, twists_total: ch.length, quiet_drawn_out: frac(kind('quiet')), claims_checked: frac(kind('sure')),
+      questions_per_puzzle: fmt(N.questions, 2), specific_questions_per_puzzle: fmt(N.targeted, 2), repeated_questions_per_puzzle: fmt(N.repeats, 2), followups_per_puzzle: fmt(N.followUps, 2), turns_per_puzzle: fmt(N.turns, 2), words_per_puzzle: fmt(N.words, 1), we_per_100_words: fmt(N.weRate, 2), points_lost_hidden: fmt(N.hidden, 2), points_lost_use: fmt(N.use, 2),
+      fun: sv.fun || '', fair: sv.fair || '', comment: (sv.comment || '').trim() };
+    R.forEach(r => { row[r.id + '_q1'] = fmt(r.scores[0], 1); row[r.id + '_q2'] = fmt(r.scores[1], 1); });
+    Object.keys(row).forEach(k => { if (typeof row[k] === 'string') row[k] = row[k].replace(/−/g, '-'); });
+    return row;
+  }
   function exportAI(kind) {
     const R = AI.results, N = summaryNumbers(R), name = AI.settings.name || '';
-    const uniq = xs => [...new Set(xs.filter(Boolean))].join('+');
-    const engine = uniq(R.map(r => r.engine)), model = uniq(R.map(r => r.model)), version = R[0] && R[0].version || 1;
-    if (kind === 'json') { offerFile('ai_leadership_test.json', JSON.stringify({ name, finished: new Date().toISOString(), test_version: version, summary: N.team.length ? { team_score: N.teamScore, team_score_range: [N.teamLo, N.teamHi], solved: N.solved, questions: N.nq, solo_score: N.soloScore, solo_questions: N.soloN, points_lost_hidden: N.hidden, points_lost_use: N.use } : null, puzzles: R }, null, 2), 'application/json'); return; }
-    const row = { name, finished: new Date().toISOString(), test_version: version, engine, model, team_score: fmt(N.teamScore, 2), team_score_low: fmt(N.teamLo, 2), team_score_high: fmt(N.teamHi, 2), questions_solved: N.solved, questions: N.nq, solo_score: fmt(N.soloScore, 2), solo_questions: N.soloN, info_surfaced: N.surfaced, info_total: N.critical, questions_per_puzzle: fmt(N.questions, 2), specific_questions_per_puzzle: fmt(N.targeted, 2), repeated_questions_per_puzzle: fmt(N.repeats, 2), followups_per_puzzle: fmt(N.followUps, 2), turns_per_puzzle: fmt(N.turns, 2), words_per_puzzle: fmt(N.words, 1), we_per_100_words: fmt(N.weRate, 2), points_lost_hidden: fmt(N.hidden, 2), points_lost_use: fmt(N.use, 2) };
-    R.forEach(r => { row[r.id + '_q1'] = fmt(r.scores[0], 1); row[r.id + '_q2'] = fmt(r.scores[1], 1); });
-    offerFile('ai_leadership_test.csv', toCSV(Object.keys(row), [row]).replace(/−/g, '-'), 'text/csv');
+    const version = R[0] && R[0].version || 1;
+    if (kind === 'json') { offerFile('ai_leadership_test.json', JSON.stringify({ name, finished: new Date().toISOString(), test_version: version, summary: N.team.length ? { team_score: N.teamScore, team_score_range: [N.teamLo, N.teamHi], solved: N.solved, questions: N.nq, solo_score: N.soloScore, solo_questions: N.soloN, points_lost_hidden: N.hidden, points_lost_use: N.use } : null, survey: AI.survey, puzzles: R }, null, 2), 'application/json'); return; }
+    const row = resultRow();
+    offerFile('ai_leadership_test.csv', toCSV(Object.keys(row), [row]), 'text/csv');
+  }
+  async function sendResult(status, btn) {
+    const row = resultRow();
+    delete row.name; delete row.finished;
+    btn.disabled = true; status.textContent = 'Sending…';
+    try {
+      const res = await fetch(PILOT_URL + '/result', { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ v: PZ.VERSION, row }) });
+      if (!res.ok) throw new Error(res.status);
+      AI.survey.sent = true; saveLast();
+      status.textContent = 'Sent. Thank you!';
+    } catch (e) { btn.disabled = false; status.textContent = 'Could not send it right now. You can download the results file instead.'; }
+  }
+  /** The pilot panel: two quick ratings, a comment, and an optional anonymous send. */
+  function pilotPanel() {
+    const sv = AI.survey;
+    const status = h('span', { class: 'small muted', 'aria-live': 'polite' }, sv.sent ? 'Sent. Thank you!' : '');
+    const scale = (key, label, lo, hi) => h('div', { class: 'field' }, h('span', { class: 'label', id: 'lbl-' + key }, label),
+      h('div', { class: 'scale', role: 'group', 'aria-labelledby': 'lbl-' + key },
+        h('span', { class: 'small muted' }, lo),
+        [1, 2, 3, 4, 5].map(v => h('button', { type: 'button', class: 'scale-btn', 'aria-pressed': sv[key] === v ? 'true' : 'false', 'aria-label': `${v} of 5`, disabled: sv.sent || null,
+          onclick: e => { sv[key] = v; saveLast(); $$('button', e.currentTarget.parentElement).forEach(b => b.setAttribute('aria-pressed', b === e.currentTarget ? 'true' : 'false')); } }, String(v))),
+        h('span', { class: 'small muted' }, hi)));
+    const send = h('button', { class: 'btn primary', type: 'button', disabled: sv.sent || null, onclick: e => sendResult(status, e.currentTarget) }, 'Send anonymously');
+    return h('div', { class: 'panel flow', id: 'pilot' },
+      h('div', { class: 'panel-head' }, h('h3', {}, 'Help improve the test'), h('p', {}, 'Optional · 20 seconds')),
+      h('p', { class: 'small' }, 'This test is new. Your ratings show whether it is fun and whether the feedback feels fair, before anything else gets built.'),
+      h('div', { class: 'row' }, scale('fun', 'How much did you enjoy it?', 'not at all', 'a lot'), scale('fair', 'How fair did the feedback feel?', 'unfair', 'spot on')),
+      h('div', { class: 'field' }, h('label', { for: 'pilot-comment' }, 'Anything that felt odd, unfair or fun? ', h('span', { class: 'hint' }, 'optional')),
+        h('textarea', { id: 'pilot-comment', rows: 2, maxlength: 600, disabled: sv.sent || null, oninput: e => { sv.comment = e.target.value.slice(0, 600); saveLast(); } }, sv.comment || '')),
+      h('div', { class: 'btn-row' }, PILOT_URL ? send : '', status),
+      h('p', { class: 'small muted' }, (PILOT_URL ? '"Send anonymously" sends your scores, leadership style, these ratings and your comment, never your name or your chat. ' : '') + 'Your ratings are also added to the results file you download.'));
+  }
+  // the puzzles' twists, as the leader met them
+  function twistText(c) {
+    const nm = folName(c.fid);
+    if (c.kind === 'quiet') return c.met ? `${nm} held back when you wrote to everyone, and you drew ${nm} out.` : `${nm} held back when you wrote to everyone, and ${nm}'s decisive reports stayed hidden.`;
+    return c.met ? `${nm} claimed a report rules out an option that it doesn't, and you checked instead of taking it on trust.` : `${nm} claimed a report rules out an option that it doesn't, and you took it on trust.`;
   }
 
   /* ================= boot ================= */

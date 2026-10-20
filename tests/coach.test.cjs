@@ -10,7 +10,11 @@ function check(name, fn) {
   try { fn(); console.log('ok   ' + name); }
   catch (e) { failures++; console.log('FAIL ' + name + '\n     ' + e.message); }
 }
-const t1 = PZ.PUZZLES.find(p => p.id === 't1'), t3 = PZ.PUZZLES.find(p => p.id === 't3'), s1 = PZ.PUZZLES.find(p => p.id === 's1');
+const find = id => PZ.PUZZLES.find(p => p.id === id);
+// The chat mechanics are checked on copies without the puzzles' twists (a quiet or an overconfident teammate);
+// the twists have their own checks at the end.
+const plain = p => Object.assign({}, p, { dynamics: {} });
+const T1 = find('t1'), T2 = find('t2'), T4 = find('t4'), t1 = plain(T1), t3 = plain(find('t3')), s1 = find('s1');
 const num = (p, re) => p.clues.find(c => re.test(c.text)).num;
 // t1: Mira holds the Linden & Sons rule-out and a report on Dario Ricci; Theo the Bruno Keller rule-out;
 // Jonas the Elin Berg rule-out (against the pigment case fact). In t3 the leader's own report rules out Clean Rivers Trust.
@@ -291,6 +295,98 @@ check('summary: specific strengths and tips across puzzles; repeating a request 
   const eff = T => T.targeted + 0.5 * T.generic;
   assert(eff(G.totals) >= 3 && eff(X.totals) <= 0.5, eff(G.totals) + ' vs ' + eff(X.totals));
   assert(G.totals.followUps > X.totals.followUps && G.totals.targetedShare > 0.7, JSON.stringify(G.totals));
+});
+
+/* ---------- the puzzles' twists ---------- */
+const brief = p => ['all', caseFile(p) + ' Which of your reports rule out an option?'];
+const quietOf = p => p.dynamics.quiet;
+
+check('a quiet teammate holds back in replies to everyone and opens up when addressed by name', () => {
+  const msgs = play(T1, [brief(T1), ['all', 'Anything else?'], ['all', 'Anything else?']]);
+  const jonas = msgs.filter(m => m.from === quietOf(T1));
+  assert.strictEqual(jonas.length, 2, 'two hesitant lines, then silence: ' + jonas.map(m => m.text).join(' | '));
+  assert(jonas.every(m => !C.reportNums(m.text).length), 'shares no reports');
+  const a = C.analyse(T1, msgs, bestAnswer(T1, msgs));
+  const held = PZ.criticalFollowerClues(T1).filter(c => c.holder === 'f3');
+  assert(held.length >= 1 && held.every(c => a.metrics.missedNums.includes(c.num)), 'Jonas\'s decisive reports stay hidden');
+  assert.deepStrictEqual(a.metrics.challenge, { kind: 'quiet', fid: 'f3', met: false });
+  const tip = a.observations.find(o => o.key === 'quiet');
+  assert(tip && tip.tone === 'tip' && /Jonas held back/.test(tip.text) && /by name/.test(tip.text), tip && tip.text);
+  assert(a.info.actual < 99, 'the briefing routine alone no longer gets 100 here: ' + a.info.actual);
+  // turning to Jonas by name in a message to everyone, or directly, draws out his clashes with the case facts heard earlier
+  [['all', 'Jonas, what about yours?'], ['f3', 'What about you?']].forEach(ask => {
+    const m2 = play(T1, [brief(T1), ask]);
+    const b = C.analyse(T1, m2, bestAnswer(T1, m2));
+    assert.strictEqual(b.metrics.surfaced, b.metrics.critical, ask[1] + ': surfaced ' + b.metrics.surfaced);
+    assert.deepStrictEqual(b.metrics.challenge, { kind: 'quiet', fid: 'f3', met: true });
+    const good = b.observations.find(o => o.key === 'quiet');
+    assert(good && good.tone === 'good' && /turned to Jonas directly/.test(good.text), good && good.text);
+    assert(b.metrics.asksToAll <= 2, 'still efficient: ' + b.metrics.asksToAll);
+  });
+  // asking everyone by name from the start: Jonas never had to hold back, so the twist doesn't apply
+  const direct = C.analyse(T1, play(T1, [['f1', caseFile(T1)], ['f2', caseFile(T1)], ['f3', caseFile(T1)]]), even);
+  assert(!direct.metrics.challenge, JSON.stringify(direct.metrics.challenge));
+});
+
+check('an overconfident teammate claims a clash that is not there once told the case fact, and drops it when questioned', () => {
+  const s = T2.dynamics.sure, opt = T2.questions[s.q].options[s.option];
+  assert(T2.questions[s.q].answer.includes(s.option), 'the claimed option is a right answer');
+  // no claim before the case fact comes up
+  const early = play(T2, [['all', 'Please share all your reports.']]);
+  assert(!early.some(m => m.from === s.fid && /rules out/.test(m.text)), early.map(m => m.text).join(' | '));
+  const msgs = play(T2, [brief(T2)]);
+  const claim = msgs.find(m => m.from === s.fid && m.text.includes('#' + s.num));
+  assert(claim && new RegExp('rules out ' + opt).test(claim.text), msgs.map(m => m.text).join(' | '));
+  // trusting every claimed clash costs points; checking it keeps them
+  const trusting = bestAnswer(T2, msgs).map(a => a.slice());
+  trusting[s.q] = [0, 1, 2, 3, 4].map(k => (trusting[s.q][k] > 0 && k !== s.option ? 1 : 0)).map((x, k, xs) => (x ? Math.round(100 / xs.filter(Boolean).length) : 0));
+  trusting[s.q][trusting[s.q].findIndex(x => x > 0)] += 100 - trusting[s.q].reduce((a, b) => a + b, 0);
+  const a = C.analyse(T2, msgs, trusting);
+  assert.deepStrictEqual(a.metrics.challenge, { kind: 'sure', fid: s.fid, met: false });
+  const tip = a.observations.find(o => o.key === 'swayed');
+  assert(tip && /Theo said report #\d+ rules out Strawberries/.test(tip.text) && /up to 25 points/.test(tip.text) && /case file yourself/.test(tip.text), tip && tip.text);
+  assert(!a.observations.some(o => o.key === 'dropped'), 'no second tip about the same option');
+  const b = C.analyse(T2, msgs, bestAnswer(T2, msgs));
+  assert.deepStrictEqual(b.metrics.challenge, { kind: 'sure', fid: s.fid, met: true });
+  assert(b.observations.some(o => o.key === 'checked' && o.tone === 'good'), b.observations.map(o => o.key).join(','));
+  // questioned, the teammate admits the mistake
+  [['f2', 'Theo, are you sure? Roots of 15 cm fit in 40 cm beds.'], ['all', 'Why would #' + s.num + ' rule out Strawberries?']].forEach(q => {
+    const m2 = play(T2, [brief(T2), q]), last = m2.filter(m => m.from === s.fid).pop();
+    assert(/stays in|after all|doesn't clash/.test(last.text), last.text);
+  });
+  // an LLM teammate's wording (from a live Gemini run) counts as the claim; its concession does not
+  const live = [{ from: 'leader', to: 'all', text: caseFile(T2) }, { from: s.fid, to: 'leader', text: `Also, Report #${s.num} says strawberries have roots only 15 cm deep, so they're ruled out because the beds are 40 cm deep.` }];
+  assert(C.analyse(T2, live, even).metrics.claim.made, 'live wording');
+  const conceded = [{ from: 'leader', to: 'all', text: caseFile(T2) }, { from: s.fid, to: 'leader', text: `Fair point, so Report #${s.num} doesn't rule out Strawberries. Report #5 rules out Sprinklers though.` }];
+  assert(!C.analyse(T2, conceded, even).metrics.claim.made, 'a concession is not a claim');
+  // T4: the same twist on a different question and teammate
+  const s4 = T4.dynamics.sure, m4 = play(T4, [brief(T4)]);
+  assert(m4.some(m => m.from === s4.fid && m.text.includes('#' + s4.num) && /rules out Slow River/.test(m.text)), m4.map(m => m.text).join(' | '));
+});
+
+check('the briefing routine meets both Quick twists; handling them is named in the style', () => {
+  const run = (p, script, answer) => { const msgs = play(p, script); return { title: p.title, solo: false, analysis: C.analyse(p, msgs, answer ? answer(msgs) : bestAnswer(p, msgs)) }; };
+  // brief everyone once and trust every claimed clash
+  const trust = msgs => { const s = T2.dynamics.sure, a = bestAnswer(T2, msgs); a[s.q] = [34, 33, 33, 0, 0]; return a; };
+  const routine = [run(T1, [brief(T1)]), run(T2, [brief(T2)], trust)];
+  const R = C.summarise(routine), style = C.leaderStyle(C.habits(R.totals), R.totals);
+  assert(R.tips.some(o => o.key === 'swayed') && R.tips.some(o => o.key === 'quiet'), R.tips.map(o => o.key).join(','));
+  assert(/Two things to watch/.test(style.text), style.text);
+  assert.strictEqual(R.totals.challenges.filter(c => c.met).length, 0);
+  // draw out the quiet teammate and check the claim
+  const careful = [run(T1, [brief(T1), ['f3', 'Jonas, what about yours?']]), run(T2, [brief(T2), ['f2', 'Theo, are you sure? Roots of 15 cm fit in 40 cm beds.']])];
+  const K = C.summarise(careful), ks = C.leaderStyle(C.habits(K.totals), K.totals);
+  assert.strictEqual(K.totals.challenges.filter(c => c.met).length, 2);
+  assert(/drew out the quiet one and checked the overconfident one/.test(ks.text), ks.text);
+  assert(!K.tips.some(o => ['swayed', 'quiet'].includes(o.key)), K.tips.map(o => o.key).join(','));
+});
+
+check('the LLM brief carries the twist only for the teammate who has it', () => {
+  const quiet = PZ.followerBrief(T1, PZ.FOLLOWERS[2]), other = PZ.followerBrief(T1, PZ.FOLLOWERS[0]);
+  assert(/hold back/.test(quiet) && !/YOUR MANNER/.test(other));
+  const s = T2.dynamics.sure, sure = PZ.followerBrief(T2, PZ.FOLLOWERS.find(f => f.id === s.fid));
+  assert(sure.includes('report #' + s.num + ' rules out Strawberries') && sure.includes(T2.questions[s.q].facts[s.fact].text), sure.slice(-600));
+  assert(!/YOUR MANNER/.test(PZ.followerBrief(find('t5'), PZ.FOLLOWERS[0])), 't5 has no twist');
 });
 
 console.log(failures ? failures + ' check(s) failed' : 'all coach checks passed');

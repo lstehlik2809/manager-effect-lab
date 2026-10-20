@@ -2,7 +2,7 @@
 // browser client (LLM.hostedStream) end to end against it. No network, no key.
 import assert from 'node:assert';
 import { createRequire } from 'node:module';
-import worker, { DailyBudget } from '../worker/worker.mjs';
+import worker, { DailyBudget, PilotStore } from '../worker/worker.mjs';
 const require = createRequire(import.meta.url);
 const PZ = require('../src/puzzles.js');
 const LLM = require('../src/llm.js');
@@ -93,6 +93,45 @@ await check('hides Gemini error details from visitors', async () => {
     assert.strictEqual(res.status, 502);
     assert(!(await res.text()).includes('1234'));
   } finally { globalThis.fetch = saved; console.error = err; }
+});
+
+
+// an in-memory stand-in for Durable Object storage (get, put, list by prefix)
+const memoryStorage = () => { const m = new Map(); return { get: async k => m.get(k), put: async (k, v) => { m.set(k, structuredClone(v)); }, list: async ({ prefix }) => new Map([...m].filter(([k]) => k.startsWith(prefix)).sort()) }; };
+const memoryPilot = () => { const obj = new PilotStore({ storage: memoryStorage() }); return { idFromName: () => 'pilot', get: () => ({ fetch: (u, init) => obj.fetch(new Request(u, init)) }) }; };
+const post = (path, b, headers) => new Request('https://w.example' + path, { method: 'POST', headers: Object.assign({ origin: ORIGIN, 'content-type': 'text/plain' }, headers), body: JSON.stringify(b) });
+
+await check('pilot: counts events anonymously and stores results players send, readable only with the token', async () => {
+  const e = env({ PILOT_STORE: memoryPilot(), PILOT_TOKEN: 'secret' });
+  const ev = over => post('/event', Object.assign({ v: PZ.VERSION, engine: 'hosted' }, over));
+  assert.strictEqual((await worker.fetch(ev({ kind: 'start', length: 'quick' }), e)).status, 204);
+  assert.strictEqual((await worker.fetch(ev({ kind: 'start', length: 'quick' }), e)).status, 204);
+  assert.strictEqual((await worker.fetch(ev({ kind: 'puzzle', puzzle: 't1' }), e)).status, 204);
+  assert.strictEqual((await worker.fetch(ev({ kind: 'finish', length: 'quick', done: 2 }), e)).status, 204);
+  // only known kinds, lengths, engines and team puzzles; current version; allowed origins
+  for (const bad of [{ kind: 'start', length: 'huge' }, { kind: 'puzzle', puzzle: 's1' }, { kind: 'finish', length: 'quick', done: 9 }, { kind: 'login', length: 'quick' }, { kind: 'start', length: 'quick', engine: 'x' }])
+    assert.strictEqual((await worker.fetch(ev(bad), e)).status, 400, JSON.stringify(bad));
+  assert.strictEqual((await worker.fetch(ev({ kind: 'start', length: 'quick', v: PZ.VERSION - 1 }), e)).status, 409);
+  assert.strictEqual((await worker.fetch(post('/event', { v: PZ.VERSION, kind: 'start', length: 'quick', engine: 'hosted' }, { origin: 'https://evil.example' }), e)).status, 403);
+  // a sent result: the name is dropped, values must be short and flat
+  const row = { name: 'Alice', team_score: 87.5, style: 'The Briefer', fun: 4, fair: 5, comment: 'Theo was annoying!' };
+  assert.strictEqual((await worker.fetch(post('/result', { v: PZ.VERSION, row }), e)).status, 204);
+  assert.strictEqual((await worker.fetch(post('/result', { v: PZ.VERSION, row: { style: 'x'.repeat(200) } }), e)).status, 400);
+  assert.strictEqual((await worker.fetch(post('/result', { v: PZ.VERSION, row: { 'Bad Key': 1 } }), e)).status, 400);
+  assert.strictEqual((await worker.fetch(post('/result', { v: PZ.VERSION, row: { nested: { a: 1 } } }), e)).status, 400);
+  // reading needs the token
+  const read = auth => worker.fetch(new Request('https://w.example/pilot', { headers: auth ? { authorization: auth } : {} }), e);
+  assert.strictEqual((await read()).status, 404);
+  assert.strictEqual((await read('Bearer wrong')).status, 404);
+  const data = await (await read('Bearer secret')).json();
+  const n = (kind, what) => data.counts.filter(c => c.kind === kind && c.what === what).reduce((a, c) => a + c.n, 0);
+  assert.strictEqual(n('start', 'quick'), 2); assert.strictEqual(n('puzzle', 't1'), 1); assert.strictEqual(n('finish', 'quick'), 1);
+  assert.strictEqual(data.counts.find(c => c.kind === 'finish').done, 2);
+  assert.strictEqual(data.results.length, 1);
+  assert.deepStrictEqual(data.results[0].row, { team_score: 87.5, style: 'The Briefer', fun: 4, fair: 5, comment: 'Theo was annoying!' });
+  // switched off: accepted and dropped
+  const off = env({ PILOT_STORE: memoryPilot(), PILOT: 'off' });
+  assert.strictEqual((await worker.fetch(post('/result', { v: PZ.VERSION, row }), off)).status, 204);
 });
 
 console.log(failures ? failures + ' check(s) failed' : 'all worker checks passed');

@@ -8,7 +8,7 @@ The app opens on a playful leadership test inspired by the second paper, in whic
 
 ## What's inside
 
-- **Take the test** (landing page). Lead three AI teammates through hidden-profile puzzles: you hold the case file, they hold most of the reports, and only together can you tell which reports rule an option out. **Quick** (the default) is two team puzzles, about 10–15 minutes; **Standard** adds a solo warm-up and has four team puzzles, about 20–25 minutes; **Extended** is the study's full set of three solo warm-ups and six team puzzles, about 40–45 minutes. Players can stop after any team puzzle and still get a result. Progress is saved in the browser as they play, so a reload, a closed tab or "Save and exit" can be resumed from the start screen within a week, with the clock paused while they were away. A reload opens at the top, where the resume box is, and while a test is unfinished the start button reads "Start a new test" and says it replaces the saved one. Teammates need no key and no sign-up: live AI teammates through the optional hosted worker (see below), or scripted teammates that run in the browser. Visitors can also use their own Gemini or Anthropic key, and in the claude.ai version the teammates run on the visitor's Claude account. After each puzzle the player gets specific feedback from their own chat: which question drew out which decisive report, which reports stayed hidden, who held them and what they were worth, repeated or general requests, and where the points went (reports that stayed hidden versus how the reports in hand were used). At the end come a raw credence score, the three habits Study 2 linked to effective leaders (asking questions, back-and-forth, drawing out hidden information) with rough ratings, the strongest specific observations across puzzles, a playful leadership style, and a result card sized for a LinkedIn post with a "Share on LinkedIn" button. **Compare a group**, for teams and researchers, loads several people's results files and estimates each person's leadership net of solo reasoning skill. The test is not validated (see below).
+- **Take the test** (landing page). Lead three AI teammates through hidden-profile puzzles: you hold the case file, they hold most of the reports, and only together can you tell which reports rule an option out. **Quick** (the default) is two team puzzles, about 10–15 minutes; **Standard** adds a solo warm-up and has four team puzzles, about 20–25 minutes; **Extended** is the study's full set of three solo warm-ups and six team puzzles, about 40–45 minutes. Players can stop after any team puzzle and still get a result. Progress is saved in the browser as they play, so a reload, a closed tab or "Save and exit" can be resumed from the start screen within a week, with the clock paused while they were away. A reload opens at the top, where the resume box is, and while a test is unfinished the start button reads "Start a new test" and says it replaces the saved one. Teammates need no key and no sign-up: live AI teammates through the optional hosted worker (see below), or scripted teammates that run in the browser. Visitors can also use their own Gemini or Anthropic key, and in the claude.ai version the teammates run on the visitor's Claude account. After each puzzle the player gets specific feedback from their own chat: which question drew out which decisive report, which reports stayed hidden, who held them and what they were worth, repeated or general requests, and where the points went (reports that stayed hidden versus how the reports in hand were used). In four of the six team puzzles one teammate makes leading harder: a quiet teammate holds back when the leader writes to everyone, or an overconfident one claims a report rules out an option that it does not (see *Teammate twists* below). At the end come a raw credence score, the three habits Study 2 linked to effective leaders (asking questions, back-and-forth, drawing out hidden information) with rough ratings, the strongest specific observations across puzzles, how the player dealt with the teammate twists, a playful leadership style, and a result card sized for a LinkedIn post with a "Share on LinkedIn" button. An optional panel asks two pilot questions (how much fun, how fair the feedback felt) and a comment, and can send them with the scores anonymously. **Compare a group**, for teams and researchers, loads several people's results files, shows a pilot overview (completion, ratings, score spread, styles) and estimates each person's leadership net of solo reasoning skill. The test is not validated (see below).
 - **The research.** The procedure and the main findings of both papers, with their caveats.
 - **Plan a team study.** A reliability calculator that shows how many teams each manager has to lead before an individual estimate means much, and a rotation generator that assigns managers to random teams with as few repeat pairings as possible. It exports a CSV template for the results. This tab and the next are a toolkit for your own experiment: you supply the team task, the individual skill test and the sessions.
 - **Analyse a team study.** Load one row per team per round and, optionally, a file of individual skill scores. You get the typical manager effect with a profile-likelihood interval and a randomization-inference p-value, shrunken estimates for every manager, an out-of-sample check, the prediction model, and the measures that predict good management. The tab opens on simulated example data that mirrors Study 1.
@@ -61,6 +61,19 @@ The puzzles are newly written, but each team puzzle copies the structure of one 
 - Quick uses t1 and t2, Standard t1–t4, Extended all six. Each subset averages 4.5–4.75 rule-out reports per puzzle; the study's six average 4.7.
 - The three solo warm-ups use the same kinds of reports with every report visible. The study had three individual puzzles; its analysis code suggests they had three questions with four options each. Here they keep the team format of two questions with five options.
 
+### Teammate twists
+
+A review of version 4 found that one routine solved every puzzle: tell the team the case file, then rule out whatever the teammates said clashed with it. That earned 100 and "nothing to fix" after one or two messages, so the test showed little beyond efficient briefing. Since version 5, four team puzzles add one teammate who behaves differently, so they ask for different leadership moves:
+
+| Puzzle | Twist | What it takes |
+|---|---|---|
+| t1 The Unsigned Portrait | Jonas is quiet: in reply to a message to everyone he says only that he'll let the others go first (twice at most), then stays silent. He holds two of the five decisive reports. | Notice who hasn't contributed and ask them by name or directly. Then he checks his reports against the case facts he heard earlier. |
+| t2 The Rooftop Garden | Theo is overconfident: once told that the beds are 40 cm deep, he claims that shared report "Strawberries have shallow roots, about 15 cm deep" rules out Strawberries. It doesn't (a bed rules a plant out only when the plant needs a deeper one), and Strawberries is a right answer. | Check a teammate's claimed clash against the case file instead of taking it on trust. Questioned, Theo admits the mistake. |
+| t3 The Charity Run | Mira is quiet, as Jonas in t1. She holds two of the six decisive reports. | As t1. |
+| t4 The Launch Film | Jonas is overconfident: once told the track must be at least two minutes long, he claims that his report "Slow River's long version runs for six minutes" rules out Slow River. | As t2: "at least" sets a minimum, not a maximum. |
+
+t5 and t6 have no twist, as in Study 2. Quick (t1, t2) has one twist of each kind; Standard adds one more of each. The puzzles, answers and scoring are unchanged, so a twist costs points only through what the leader does: the quiet teammate's decisive reports stay hidden, or a right answer gets ruled out. The LLM teammates get the twist as a short "manner" section at the end of their brief (`mannerBrief` in `src/puzzles.js`); the scripted teammates follow the same rules. The feedback names the twist when it came into play and whether the leader handled it, and the leadership style adds a sentence about it. A twist that never came into play (the leader asked the quiet teammate directly from the start, or never shared the case fact the overconfident teammate misreads) is not counted either way.
+
 The options left standing are equally likely, and that is the correct credence profile. Tests (`tests/puzzles.test.cjs`) check every puzzle against the slot pattern of its original item. They also check that every puzzle is solvable, that no one can solve it alone, that each report names exactly one option of its own question, that no report states its own conclusion, and that every decisive report points to the case fact it clashes with.
 
 Scores are 100 × (1 − total variation distance) between the submitted credences and the correct ones. That is the rule in the authors' published analysis code: (200 − Σ|credence − correct|) / 200 per question. Teammates see only the leader's messages to them or to everyone, and they cite reports by number. That lets the app count how many decisive private reports the leader drew out. The teammate prompt is in `src/puzzles.js` (`followerBrief`). The count depends on teammates citing report numbers as instructed, so it undercounts when they paraphrase.
@@ -77,22 +90,33 @@ Scores are 100 × (1 − total variation distance) between the submitted credenc
 - **Missed reports**: each decisive report that never came up is named with its holder, what it rules out, whether the leader ever asked that teammate, and the points it was worth. A right answer reached without the report is called a guess.
 - **Where the points went**: the best answer possible with the reports the leader had (their own, the shared ones and those cited by teammates) splits the points lost into *reports that stayed hidden* (leading) and *using the reports in hand* (reasoning), with notes on options kept despite a report ruling them out or dropped without one.
 - Praise goes to specific or direct questions that drew out decisive reports, never to a general call to everyone.
+- **Teammate twists**: when the leader wrote to everyone while a quiet teammate held decisive reports, the feedback says whether the leader turned to that teammate and drew them out, or names how many decisive reports stayed with them. When the overconfident teammate made the claim (cited the misread report and said it rules the option out), the feedback says whether the leader kept the option, and otherwise explains why the report does not rule it out and what trusting the claim cost (25 points on that question in t2).
 
 ### Teammates without a key
 
-**Scripted teammates** (`src/scripted.js`) run in the browser. They answer only messages that reach them, stay quiet when a message to everyone addresses someone else by name, match options, report numbers and details from their reports, pass on at most two reports at a time, say when they have more or nothing more, and give a view when asked. Like the LLM teammates, they say they can't tell which reports rule anything out until the leader passes on case facts, and then point out the reports that clash with them. They are less lifelike than LLM teammates, and their scores are analysed separately.
+**Scripted teammates** (`src/scripted.js`) run in the browser. They answer only messages that reach them, stay quiet when a message to everyone addresses someone else by name, match options, report numbers and details from their reports, pass on at most two reports at a time, say when they have more or nothing more, and give a view when asked. Like the LLM teammates, they say they can't tell which reports rule anything out until the leader passes on case facts, and then point out the reports that clash with them, and they play the puzzles' twists by the same rules. They are less lifelike than LLM teammates, and their scores are analysed separately.
 
 **Hosted AI teammates** (`worker/`) let visitors use Gemini 3.8 Flash without a key. A Cloudflare Worker holds one Gemini key as a secret. The browser sends only the puzzle and teammate ids and the chat; the worker builds the teammate brief itself (the same `followerBrief` and request settings as the browser, via `geminiRequest` in `src/llm.js`), so it cannot be used as a general-purpose model proxy. It accepts requests only from the allowed origins, checks the chat's size and shape, caps requests per visitor IP per minute (`PER_VISITOR`, 60) and for everyone per UTC day (`DAILY_LIMIT`, 4000; set it to 0 to switch the hosted teammates off), and never passes Google's error text to visitors. When the daily cap is reached, players are offered scripted teammates.
 
-A teammate reply costs about 850–950 input tokens and a few dozen output tokens (`tests/live-api.mjs` prints them). A quick test makes roughly 40–120 replies, a standard one 100–250 and an extended one 150–375, so the default daily cap is at most about 3–4 million input tokens a day; check Gemini's current pricing for the key you use, and consider a budget alert on the Google Cloud project as well.
+A teammate reply costs about 850–1,150 input tokens (the teammate with a twist has a slightly longer brief) and a few dozen output tokens (`tests/live-api.mjs` prints them). A quick test makes roughly 40–120 replies, a standard one 100–250 and an extended one 150–375, so the default daily cap is at most about 3–4 million input tokens a day; check Gemini's current pricing for the key you use, and consider a budget alert on the Google Cloud project as well.
 
 To deploy (Cloudflare account and wrangler login needed):
 
 ```bash
 cd worker
 npx wrangler@4.145.0 secret put GEMINI_API_KEY
+npx wrangler@4.145.0 secret put PILOT_TOKEN      # optional: lets you read the pilot data
 npx wrangler@4.145.0 deploy
 ```
+
+The worker checks the test version on every request, so after a change to the puzzles or their briefs (`VERSION` in `src/puzzles.js`), deploy the worker and publish the rebuilt page together; until both are updated, hosted teammates answer "This page is out of date".
+
+**Pilot data.** The same worker keeps two kinds of pilot data in a Durable Object (`PilotStore`), so that a pilot can check completion, enjoyment, fairness and score spread:
+
+- *Anonymous counts* (`POST /event`): a test started (length and engine), a team puzzle submitted (its id), a test finished (length, engine and how many team puzzles were done), per UTC day. No chat, no name, no IP address, no identifier that links one count to another.
+- *Results players choose to send* (`POST /result`, the "Send anonymously" button at the end): the same fields as the results CSV (scores, habits, style, twists handled, the two ratings and the comment) without the name and the chat. Only short flat values are accepted.
+
+Reading them needs the `PILOT_TOKEN` secret: `node --env-file=path/to/.env tools/pilot-export.mjs` prints the started/finished counts and the completion rate per length and writes the sent results to `pilot_results.csv`, which **Compare a group** loads. Set the `PILOT` variable in `worker/wrangler.jsonc` to `"off"` to stop collecting; the app then still works, and its requests are simply dropped. The intro tells visitors about both. The claude.ai version cannot reach the worker and collects nothing.
 
 Then set `HOSTED_DEPLOYED` in `src/app.js` to the worker's URL ending in `/reply` and run `npm run build`; the "Live AI teammates" option appears and becomes the default. The live worker is `manager-effect-lab-teammates` at `https://manager-effect-lab-teammates.ludek-stehlik.workers.dev/reply`; logs and usage are in the Cloudflare dashboard under Workers. To try it before deploying, run `node --env-file=path/to/.env worker/dev-server.mjs` and open the app on localhost with `?hosted=http://127.0.0.1:8787/reply`.
 
@@ -108,18 +132,26 @@ The habit ratings (strong / some / little, or efficient when every decisive clue
 
 ### Does the test separate leaders?
 
-Against the scripted teammates (two Quick puzzles, best possible answer from what came out):
+Against the scripted teammates (the two Quick puzzles; the answer is the best one possible with the reports that came out, ruling out whatever a teammate claimed unless the claim was questioned):
 
-| Strategy | Score | Requests | Style |
-|---|---|---|---|
-| One broad request for every report that rules out an option | 50–60 | 1 | The Delegator |
-| Same, then the case facts after teammates ask for them | 100 | 2 | The Briefer |
-| Case facts first | 100 | 1 | The Briefer |
-| Ask for all reports, then "keep going" once | 65–71 | 2 | The Coordinator |
-| Ask for all reports, then "keep going" three times | 100 | 4 | The Collector, with a tip to share the case facts |
-| Ask about every option of each question | 100 | 2 | The Collector |
+| Strategy | Score (t1 / t2) | Messages | Style | Twists |
+|---|---|---|---|---|
+| One broad request for every report that rules out an option | 55 (50 / 60) | 1 + 1 | The Delegator | quiet teammate missed |
+| Case facts once, trusting every claimed clash (100 in version 4) | 79 (71 / 88) | 1 + 1 | The Collector | both missed |
+| Case facts, then turn to whoever stayed quiet, and question a doubtful claim | 100 | 2 + 2 | The Briefer | both handled |
+| Ask for all reports, then "keep going" once | 64 (63 / 65) | 2 + 2 | The Delegator | quiet teammate missed |
+| Ask for all reports, then "keep going" three times | 85 (71 / 100) | 4 + 4 | The Collector | quiet teammate missed |
+| Ask about every option of each question | 85 (71 / 100) | 2 + 2 | The Collector | quiet teammate missed |
+| Ask each teammate by name about every option | 100 | 6 + 6 | The Facilitator | did not come into play |
 
-Live Gemini teammates behave the same way on the checks in `tests/live-api.mjs`. Several routes still reach 100, which is intended: the test rewards efficient leading. What differs is how much it took and what the leader did to get there. Whether real first-time visitors spread out like this is an open question. Before promoting the test as revealing, have a small group of first-time players try it, collect their results files, and look at the spread of scores and of styles (the **Compare a group** panel loads them). If most still cluster at the top after one or two messages, make the case file longer or the teammates less forthcoming.
+The table is produced by playing these scripts against `src/scripted.js`. Live Gemini teammates behave the same way on the checks in `tests/live-api.mjs`, including holding back, opening up when named, making the wrong claim and dropping it when questioned. Several routes still reach 100, which is intended. What differs is what the leader had to notice on the way.
+
+**Running a pilot.** One review run, or this table, cannot show whether first-time visitors spread out or find the same routine. Before building more, share the test with a small group (20 or more people is a reasonable aim), ask them to rate it at the end and to press "Send anonymously" (or to send you their results file), and then:
+
+1. run `tools/pilot-export.mjs` for completion: tests finished out of tests started, per length, and how many reached the second team puzzle;
+2. load `pilot_results.csv` under **Compare a group**. The pilot overview shows enjoyment and fairness ratings, the score histogram, the styles, how often the twists were handled, and the comments, with warnings when half or more score 95+, when scores barely spread, when 60% or more get the same style, or when 30% or more rate the feedback 2 or lower for fairness.
+
+If most people still score near the top, make the puzzles harder (more twists or a longer case file) before adding features; if fairness is rated low, read the comments before trusting the feedback rules.
 
 **This version is not a validated assessment.** The study's ρ = 0.81 between AI-team and human-team leadership was for its own puzzles, GPT-4o followers, six AI-team puzzles and scoring. This version has the study's scoring rule and puzzles with the study's structure, but the puzzles themselves are new, the models are different, Quick and Standard have two or four team puzzles instead of six, and there are no norms. The app therefore does not compare an individual's score with the study's leaders. The study's authors name validation against real-world leadership as the crucial next step; the same applies here, and more so.
 
@@ -135,6 +167,7 @@ npm run build        # rebuild index.html from src/
 npm test             # estimation engine, puzzles, chat feedback, scripted teammates, hosted worker
 node --env-file=.env tests/live-api.mjs gemini   # live check of the AI teammates (uses GEMINI_API_KEY)
 node --env-file=.env worker/dev-server.mjs       # local hosted teammates on :8787 (see above)
+node --env-file=.env tools/pilot-export.mjs      # pilot counts and sent results (uses PILOT_TOKEN)
 ```
 
 ## Caveats

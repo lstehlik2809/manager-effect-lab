@@ -336,3 +336,19 @@ footer { border-top: 1px solid var(--rule); padding-block: 22px 40px; color: var
 .card-preview img { display: block; width: 100%; max-width: 720px; height: auto; border: 1px solid var(--rule); border-radius: 8px; }
 details.panel > summary.group-summary { cursor: pointer; }
 details.panel[open] > summary.group-summary { margin-bottom: 4px; }
+
+/* teammate twists and the pilot panel */
+.twists { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: .9rem; }
+.twists li { display: flex; gap: 10px; align-items: baseline; }
+.twists .pill { flex: none; }
+.field > .label { font-weight: 600; font-size: .88rem; }
+.scale { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.scale-btn { font: inherit; font-weight: 600; min-width: 40px; min-height: 40px; border-radius: 8px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); cursor: pointer; }
+.scale-btn:hover:not(:disabled) { border-color: var(--accent); }
+.scale-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.scale-btn:disabled { cursor: default; opacity: .7; }
+.pilot-hist { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 4px; align-items: end; height: 96px; padding-top: 4px; }
+.pilot-hist .bin { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 2px; height: 100%; font-size: .72rem; color: var(--ink-2); }
+.pilot-hist .bin i { display: block; width: 100%; background: var(--accent); border-radius: 3px 3px 0 0; min-height: 0; }
+.pilot-hist-axis { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 4px; font-size: .72rem; color: var(--ink-3); text-align: center; border-top: 1px solid var(--rule); padding-top: 3px; }
+@media (max-width: 480px) { .scale { gap: 4px; } .scale-btn { min-width: 34px; min-height: 36px; } }

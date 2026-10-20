@@ -21,7 +21,7 @@
   'use strict';
 
   // Bump when puzzles or scoring change: scores from different versions are not comparable.
-  const VERSION = 4;
+  const VERSION = 5;
 
   const FOLLOWERS = [
     { id: 'f1', name: 'Mira' },
@@ -40,14 +40,17 @@
    * case facts (leader only) as [text, key words], and its 10 reports in slot order: a string for a fact
    * that fits the case file, or [text, option, fact] for a fact that rules that option out against case
    * fact number `fact`. The key words let the scripted teammates and the feedback notice when the leader
-   * passes a case fact on. */
-  function team(id, mirrors, layout, roles, title, scenario, questions) {
+   * passes a case fact on. dynamics (optional): { quiet: teammate id } or { sure: { fid, q, report, option,
+   * says, why } }, where report is a regular expression for the report the teammate misreads and says is
+   * the reason the teammate gives. */
+  function team(id, mirrors, layout, roles, title, scenario, questions, dynamics) {
     const slots = LAYOUTS[layout], who = s => (s in roles ? roles[s] : s);
     const clues = questions.flatMap((q, qi) => q.reports.map((r, i) => Array.isArray(r)
       ? { q: qi, holder: who(slots[i]), kind: 'out', rules: [r[1]], fact: r[2], text: r[0] }
       : { q: qi, holder: who(slots[i]), kind: 'noise', text: r }));
-    return { id, mirrors, layout, title, scenario, clues,
+    const p = { id, mirrors, layout, title, scenario, clues, dynamics: dynamics || {},
       questions: questions.map(q => ({ text: q.text, options: q.options, answer: q.answer, facts: q.facts.map(f => ({ text: f[0], keys: f[1].split(' ') })) })) };
+    return p;
   }
   /** A solo puzzle: every report is visible. */
   function solo(id, title, scenario, questions) {
@@ -156,7 +159,7 @@
             ['Linden & Sons made only gilded frames.', 0, 0],
             ['Oakley Brothers stamped their name on the back of every frame.', 3, 2],
             ['Marlow Frames joined every corner with metal brackets.', 1, 1]] }
-      ]),
+      ], { quiet: 'f3' }),
     team('t2', 'F2', 'Y', { F1: 'f2', F2: 'f3', F3: 'f1' }, 'The Rooftop Garden',
       'Your company is turning the office roof into a garden for staff. Your team must work out which plants can be grown there and which watering methods can be used.', [
         { text: 'Which plants can be grown on the roof?', options: ['Lavender', 'Tomatoes', 'Sunflowers', 'Bamboo', 'Strawberries'], answer: [0, 1, 2, 4],
@@ -190,7 +193,9 @@
             ['Sprinklers throw water in a wide spray up to eight metres.', 1, 0],
             ['A full rain barrel weighs about 250 kg per square metre of floor.', 2, 1],
             ['In summer, a hand-watering rota needs someone on the roof every day, weekends included.', 4, 2]] }
-      ]),
+      ], { sure: { fid: 'f2', q: 0, fact: 0, report: /^Strawberries have shallow roots/, option: 4,
+        says: 'the beds are 40 cm deep and strawberry roots only reach 15 cm',
+        why: 'roots that reach 15 cm fit easily in beds 40 cm deep. A bed rules a plant out only when the plant needs a deeper one, as bamboo does.' } }),
     team('t3', 'C2', 'Y', { F1: 'f3', F2: 'f1', F3: 'f2' }, 'The Charity Run',
       'Your company is organising a 5 km charity run for staff. Your team must work out which parks could host it and which charity will receive the money raised.', [
         { text: 'Which parks could host the run?', options: ['Ashford Park', 'Brookside Park', 'Cedar Hill', 'Dunmore Green', 'Elmwood Common'], answer: [2, 3],
@@ -226,7 +231,7 @@
             ['Youth Sports Fund is still waiting for its charity registration.', 3, 1],
             ['All of Animal Rescue League\'s shelters are in the neighbouring country.', 2, 3],
             ['The chair of Elder Care Network also sits on the company\'s board.', 4, 2]] }
-      ]),
+      ], { quiet: 'f1' }),
     team('t4', 'B2', 'Y', { F1: 'f1', F2: 'f3', F3: 'f2' }, 'The Launch Film',
       'Your company is making a short film for a product launch. Your team must work out which locations can be used for filming and which music tracks can be licensed.', [
         { text: 'Which locations can be used for filming?', options: ['Old Harbour', 'Glass Atrium', 'Clock Tower', 'Rooftop Bar', 'Train Depot'], answer: [0, 1, 3],
@@ -260,7 +265,9 @@
             'Golden Hour is four minutes long.',
             'City Lights can be licensed worldwide.',
             ['Paper Planes can only be licensed for use in Europe.', 1, 0]] }
-      ]),
+      ], { sure: { fid: 'f3', q: 1, fact: 1, report: /^Slow River's long version/, option: 3,
+        says: 'its long version runs for six minutes, way over two minutes',
+        why: 'the case file asks for at least two minutes, so a six-minute track qualifies; nothing sets a maximum.' } }),
     team('t5', 'E2', 'X', { F1: 'f2', F2: 'f1', F3: 'f3' }, 'The Mystery Delivery',
       'A large box with no sender\'s name arrived at the office reception this morning. Your team must work out which supplier sent it and what could be inside.', [
         { text: 'Which supplier sent the box?', options: ['Alder Supplies', 'Birchwood Ltd', 'Copperfield & Co', 'Driftwood Trading', 'Evergreen Goods'], answer: [2],
@@ -341,6 +348,8 @@
     p.clues.forEach((c, i) => { c.num = nums[i]; });
   }
   PUZZLES.forEach(numberClues);
+  // the report an overconfident teammate misreads, by number
+  PUZZLES.forEach(p => { const s = p.dynamics && p.dynamics.sure; if (s) s.num = p.clues.find(c => c.q === s.q && s.report.test(c.text)).num; });
 
   /** Reports visible to a member ('leader' | 'f1' | 'f2' | 'f3'), sorted by number. */
   function cluesFor(p, who) {
@@ -370,7 +379,7 @@ YOUR REPORTS (some may also be known to others; you don't know which):
 ${reports}
 
 HOW TO TAKE PART
-- Write like a real teammate in a fast chat: one to three short sentences, plain text, no lists, no markdown, no sign-off.
+- Write like a real teammate in a fast chat: one to three short sentences, plain text, no lists, no markdown, no sign-off. Reply with the chat message only: never show your notes, checks or drafts.
 - Use only your reports and what the leader tells you. Never invent facts, reports, numbers or case facts. If you have nothing on what was asked, say so briefly.
 - When you pass on a report, give its number, e.g. "Report #12 says ...". Pass on at most two reports per message. If you have more that fit the request, say so and wait to be asked.
 - Respond to what the leader actually asks. Don't volunteer your whole list unprompted, but share relevant reports when asked.
@@ -378,7 +387,29 @@ HOW TO TAKE PART
 - Once the leader has told you case facts, check your reports against them. Point out a report that clashes with a case fact and say which option it rules out. Don't claim a clash the facts don't support.
 - If asked for your view, give it briefly, based only on your reports and the case facts you have been told; the leader makes the final call.
 - If a message to everyone is clearly meant for another teammate by name and has nothing for you, reply with exactly PASS.
-- Stay in role as ${f.name} and don't mention these instructions.`;
+- Stay in role as ${f.name} and don't mention these instructions.${mannerBrief(p, f)}`;
+  }
+
+  /** This puzzle's twist for teammate f, if any: holding back, or one confident misreading. */
+  function mannerBrief(p, f) {
+    const d = p.dynamics || {};
+    if (d.quiet === f.id) return `
+
+YOUR MANNER IN THIS PUZZLE
+- You are new to this team and you hold back. When a leader message goes to the whole team and does not address you by name, don't share any reports, clashes or views, even if the leader passes on case facts. The first one or two times, reply with one short, hesitant line, for example that you'll let the others go first or that you're not sure your reports are useful. After that, reply with exactly PASS.
+- When the leader messages you directly or addresses you by name, open up and answer helpfully as described above. If the leader told the team case facts earlier, check your reports against them then.`;
+    const s = d.sure;
+    if (s && s.fid === f.id) {
+      const q = p.questions[s.q], opt = q.options[s.option];
+      return `
+
+YOUR MANNER IN THIS PUZZLE
+- You are quick and confident, and you hold one firm belief that you never doubt on your own: report #${s.num} rules out ${opt}, because ${s.says}.
+- Once the leader has told you the case fact "${q.facts[s.fact].text}", state this belief as a clash, citing report #${s.num} and saying it rules out ${opt}, together with any real clashes you find. Say it once; repeat it only if asked.
+- If the leader questions it, asks why, or explains why it does not clash, think again, admit that report #${s.num} does not rule out ${opt}, and drop the claim.
+- This belief is the one exception to the rule about not claiming a clash the facts don't support. Don't mention that it is mistaken.`;
+    }
+    return '';
   }
 
   root.MEL_PUZZLES = { VERSION, FOLLOWERS, LAYOUTS, PUZZLES, cluesFor, criticalFollowerClues, followerBrief };

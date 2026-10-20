@@ -386,6 +386,35 @@
         if (stillHidden) tip('offer', 3 + stillHidden, `${nameOf(fid)} offered to share more, but you didn't follow up. ${nameOf(fid)} still held ${stillHidden === 1 ? 'a decisive report' : stillHidden + ' decisive reports'}.`);
       });
       if (opts.timeLeft >= 60 && missed.length && !perQ.every(x => x.actual >= 99.5)) tip('early', 2, `You submitted with ${Math.floor(opts.timeLeft / 60)}:${String(Math.round(opts.timeLeft % 60)).padStart(2, '0')} left while ${missed.length === 1 ? 'a decisive report was' : missed.length + ' decisive reports were'} still hidden.`);
+
+      // the puzzle's twist: a teammate who holds back, or one who claims a clash that isn't there
+      const dyn = p.dynamics || {};
+      if (dyn.quiet) {
+        const qf = dyn.quiet, nm = nameOf(qf), held = critical.filter(c => c.holder === qf), got = held.filter(c => surfaced.has(c.num));
+        // held back: the leader wrote to everyone without naming this teammate at least once
+        const heldBack = leaderMsgs.some(x => !x.direct && x.aud.includes(qf));
+        metrics.quiet = { fid: qf, held: held.length, surfaced: got.length, asked: askedDirect.has(qf), heldBack };
+        if (held.length && heldBack) {
+          metrics.challenge = { kind: 'quiet', fid: qf, met: got.length === held.length };
+          if (got.length === held.length) good('quiet', 12, `${nm} held back when you wrote to everyone. You turned to ${nm} directly and drew out ${listText(got.map(c => '#' + c.num))}. Quiet teammates often hold what the team is missing.`);
+          else if (!askedDirect.has(qf)) tip('quiet', 7 + 2 * (held.length - got.length), `${nm} held back whenever you wrote to everyone and never passed on ${held.length - got.length === 1 ? 'a decisive report' : NUM[held.length - got.length] + ' decisive reports'}. When a teammate says little, ask them by name: quiet teammates often hold what the team is missing.`);
+        }
+      }
+      if (dyn.sure) {
+        const s = dyn.sure, nm = nameOf(s.fid), opt = optName(s.q, s.option);
+        // the teammate cites the misread report and says it rules the option out (a concession doesn't count)
+        const claimed = messages.some(m => m.from === s.fid && reportNums(m.text).includes(s.num) &&
+          /\brul(?:e|es|ed|ing)\s+(?:\w+\s+){0,2}out\b|\bexclud|\bdrop\b|\bcan'?t be\b/i.test(m.text) && !/\b(?:doesn'?t|does not|not|isn'?t|no longer)\s+(?:actually\s+)?(?:rule|clash)|stays in|after all/i.test(m.text) &&
+          optionMentions(p, m.text).some(o => o.q === s.q && o.k === s.option));
+        const kept = +answers[s.q][s.option] > 0;
+        metrics.claim = { fid: s.fid, made: claimed, kept };
+        if (claimed) {
+          metrics.challenge = { kind: 'sure', fid: s.fid, met: kept };
+          const cost = Math.round(100 - S.credenceScore(S.correctDist(p.questions[s.q].answer.filter(k => k !== s.option), 5), S.correctDist(p.questions[s.q].answer, 5)));
+          if (kept) good('checked', 12, `${nm} said report #${s.num} rules out ${opt}. You didn't take it on trust and kept ${opt}, which was right: ${s.why}`);
+          else tip('swayed', 9, `${nm} said report #${s.num} rules out ${opt}, and you ruled it out. It doesn't: ${s.why} ${opt} was one of the right answers on Q${s.q + 1}, so taking the claim on trust cost up to ${cost} points. When a teammate says a report rules an option out, check it against the case file yourself.`);
+        }
+      }
     }
     // using the reports: the same checks for solo and team puzzles
     perQ.forEach((x, qi) => {
@@ -393,7 +422,7 @@
         const refs = listText(kp.refs.map(n => (p.solo ? '#' + n : ref(n)))) + (kp.refs.length > 1 ? ' together' : '');
         tip('kept', 2 + kp.pct / 6, (p.solo ? `The reports rule out ${optName(qi, kp.k)} (${refs})` : `You had what you needed to rule out ${optName(qi, kp.k)} (${refs})`) + `, but you still gave it ${kp.pct}%.`);
       });
-      x.dropped.slice(0, 1).forEach(k => tip('dropped', 4, `You ruled out ${optName(qi, k)}, but no report rules it out: it was one of the right answers on Q${qi + 1}.`));
+      x.dropped.filter(k => !(metrics.claim && metrics.claim.made && p.dynamics.sure.q === qi && p.dynamics.sure.option === k)).slice(0, 1).forEach(k => tip('dropped', 4, `You ruled out ${optName(qi, k)}, but no report rules it out: it was one of the right answers on Q${qi + 1}.`));
       if (x.uneven && !x.kept.length && !x.dropped.length) tip('uneven', 2, `On Q${qi + 1} you gave unequal shares to options that no report ${p.solo ? '' : 'you saw '}separated. When the reports can't tell options apart, equal shares score best.`);
     });
     const perfect = perQ.every(x => x.actual >= 99.5);
@@ -431,7 +460,9 @@
       allAsked: team.filter(r => r.analysis.metrics.askedDirect.length === FOL.length).length,
       allSurfaced: team.filter(r => r.analysis.metrics.critical && r.analysis.metrics.surfaced === r.analysis.metrics.critical).length,
       quickPuzzles: team.filter(r => quickDone(r.analysis.metrics)).length, puzzles: n,
-      contextPuzzles: team.filter(r => r.analysis.metrics.contextShared).length
+      contextPuzzles: team.filter(r => r.analysis.metrics.contextShared).length,
+      // the puzzles' twists the leader ran into, and whether they handled them
+      challenges: team.filter(r => r.analysis.metrics.challenge).map(r => Object.assign({ puzzle: r.title }, r.analysis.metrics.challenge))
     };
     const quickMax = Math.max(0, ...team.filter(r => quickDone(r.analysis.metrics)).map(r => r.analysis.metrics.asksToAll));
     // strongest instance of each kind of observation, labelled with its puzzle
@@ -457,10 +488,14 @@
       }
       if (o.key === 'all-asked') { o.text = `You asked all three teammates directly in ${totals.allAsked} of ${n} team puzzles.`; o.weight = 1 + totals.allAsked; o.puzzle = null; }
       if (o.key === 'connect' && totals.connectsTotal > 1) o.weight += totals.connectsTotal;
+      if (o.key === 'quiet' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate held back when you wrote to everyone, and each time you turned to them directly and drew out what they held.`; o.puzzle = null; }
+      if (o.key === 'checked' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate claimed a report rules out an option that it doesn't, and each time you checked instead of taking it on trust.`; o.puzzle = null; }
       if (o.key === 'context' && totals.contextPuzzles > 1) { o.text = `You told your teammates what the case file says in ${totals.contextPuzzles === n ? (n === 2 ? 'both' : 'all ' + n) : totals.contextPuzzles + ' of ' + n} team puzzles, so they could judge which of their reports rule an option out.`; o.weight += totals.contextPuzzles; o.puzzle = null; }
     });
     tips.forEach(o => {
       if (o.key === 'no-context' && o.count > 1) { o.text = `In ${o.count} team puzzles you didn't tell your teammates what the case file says. Only you had it, so they couldn't tell which of their reports rule an option out. Passing on the case facts lets them pick out the decisive ones.`; o.puzzle = null; }
+      if (o.key === 'swayed' && o.count > 1) { o.text = `In ${o.count} team puzzles you ruled out an option because a teammate said a report rules it out, and it didn't. When a teammate claims a clash, check the report against the case file yourself.`; o.puzzle = null; }
+      if (o.key === 'quiet' && o.count > 1) { o.text = `In ${o.count} team puzzles a quiet teammate held back when you wrote to everyone, and their decisive reports stayed hidden. When a teammate says little, ask them by name.`; o.puzzle = null; }
       if (o.key === 'repeats' && o.count > 1) { o.text = `Across the test, ${totals.repeatsTotal} of your questions repeated an earlier one, such as “${o.example}”. ${REPEAT_ADVICE}`; o.puzzle = null; }
     });
     const pick = (xs, k) => xs.sort((a, b) => b.weight - a.weight).slice(0, k);
@@ -489,8 +524,24 @@
       { label: 'Drawing out hidden clues', value: `${T.surfaced} of ${T.critical} decisive clues`, rating: rate(T.critical ? T.surfaced / T.critical : NaN, 0.75, 0.4), note: 'Weak leaders learned little from their team: their answers looked like uninformed guesses.' }
     ];
   }
-  /** A playful leadership style from the habits: { name, text }. Every claim in the text rests on behaviour seen in the chat. */
+  /** A playful leadership style from the habits: { name, text }. Every claim in the text rests on behaviour seen in the chat.
+   * The puzzles' twists add a sentence: how the leader dealt with a quiet teammate or a wrong claim. */
   function leaderStyle(hb, T) {
+    const st = baseStyle(hb, T), ch = T.challenges || [];
+    const missedQuiet = ch.some(c => c.kind === 'quiet' && !c.met), swayed = ch.some(c => c.kind === 'sure' && !c.met);
+    const handled = ch.length && ch.every(c => c.met);
+    let add = '';
+    if (swayed && missedQuiet) add = 'Two things to watch: a quiet teammate kept what they knew, and you took a teammate\'s wrong claim on trust.';
+    else if (swayed) add = 'One thing to watch: you took a teammate\'s wrong claim on trust. Check claims against the case file.';
+    else if (missedQuiet) add = 'One thing to watch: a quiet teammate kept what they knew. Ask the quiet ones by name.';
+    else if (handled) {
+      const kinds = new Set(ch.map(c => c.kind));
+      add = kinds.size > 1 ? 'You also handled the teammates who made it harder: you drew out the quiet one and checked the overconfident one.'
+        : kinds.has('quiet') ? 'You also noticed the teammate who held back and drew them out.' : 'You also checked the teammate who claimed too much instead of taking it on trust.';
+    }
+    return add ? { name: st.name, text: st.text + ' ' + add } : st;
+  }
+  function baseStyle(hb, T) {
     const [q, t, i] = hb.map(x => x.rating), general = !(T.targetedShare >= 0.35);
     const complete = T.critical > 0 && T.surfaced === T.critical;
     const briefed = T.contextPuzzles > 0 && T.contextPuzzles >= T.puzzles / 2;

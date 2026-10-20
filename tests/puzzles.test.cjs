@@ -82,5 +82,27 @@ try {
   ['f1', 'f2', 'f3'].forEach(f => assert.strictEqual(last.filter(x => x === f).length, 2, f + ' holds slot 10 in two puzzles'));
   console.log('ok   the six team puzzles mirror Study 2\'s six AI-team items');
 } catch (e) { failures++; console.log('FAIL set: ' + e.message); }
+try {
+  // the twists: a quiet teammate holds something that matters; an overconfident one misreads a report it can see,
+  // about an option that is a right answer, against a case fact of the same question
+  const team = PZ.PUZZLES.filter(p => !p.solo), twist = id => team.find(p => p.id === id).dynamics;
+  team.forEach(p => {
+    const d = p.dynamics || {};
+    if (d.quiet) assert(PZ.criticalFollowerClues(p).some(c => c.holder === d.quiet), p.id + ': the quiet teammate holds a decisive report');
+    if (d.sure) {
+      const s = d.sure, q = p.questions[s.q], c = p.clues.find(x => x.num === s.num);
+      assert(c && c.q === s.q && c.kind === 'noise', p.id + ': the misread report rules nothing out');
+      assert(PZ.cluesFor(p, s.fid).includes(c), p.id + ': the teammate can see the report it misreads');
+      assert(q.answer.includes(s.option) && C.optionMentions(p, c.text).some(o => o.k === s.option), p.id + ': the claim is about a right answer the report names');
+      assert(q.facts[s.fact], p.id + ': the claim rests on a case fact of the same question');
+      assert(/^[a-z]/.test(s.says) && /\.$/.test(s.why), p.id + ': says and why read as parts of a sentence');
+    }
+  });
+  assert(twist('t1').quiet && twist('t2').sure, 'Quick has one twist of each kind');
+  assert(twist('t3').quiet && twist('t4').sure && !twist('t5').quiet && !twist('t5').sure && !twist('t6').quiet && !twist('t6').sure, 'Standard adds one more of each; t5 and t6 have none');
+  const who = team.map(p => p.dynamics.quiet || (p.dynamics.sure && p.dynamics.sure.fid)).filter(Boolean);
+  assert.strictEqual(new Set(who).size, 3, 'the twists rotate over the teammates');
+  console.log('ok   teammate twists: t1 quiet, t2 overconfident, t3 quiet, t4 overconfident');
+} catch (e) { failures++; console.log('FAIL twists: ' + e.message); }
 console.log(failures ? failures + ' puzzle check(s) failed' : 'all puzzles consistent');
 process.exit(failures ? 1 : 0);

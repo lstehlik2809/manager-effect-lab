@@ -740,8 +740,57 @@
       for (const [id, xs] of Object.entries(solo)) soloPuzzles[id] = S.mean(xs);
       let soloScore = num(r.solo_score);
       if (!isNum(soloScore) && Object.keys(solo).length) soloScore = S.mean(Object.values(solo).flat());
-      return { id: String(r.name || '').trim(), solo: soloScore, soloPuzzles, puzzles, engine: String(r.engine || '').trim() || 'unknown', model: String(r.model || '').trim(), version: String(r.test_version || '').trim() || '1' };
+      // pilot fields (newer results files): style, ratings, how far the person got, the teammate twists they met
+      const opt = k => { const x = num(r[k]); return isNum(x) ? x : NaN; };
+      const pilot = { teamScore: opt('team_score'), style: String(r.style || '').trim(), fun: opt('fun'), fair: opt('fair'), comment: String(r.comment || '').trim(),
+        planned: opt('team_puzzles_planned'), done: opt('team_puzzles_done'), twistsMet: opt('twists_met'), twists: opt('twists_total') };
+      if (!isNum(pilot.teamScore) && Object.keys(team).length) pilot.teamScore = S.mean(Object.values(team).flat());
+      return { id: String(r.name || '').trim(), solo: soloScore, soloPuzzles, puzzles, engine: String(r.engine || '').trim() || 'unknown', model: String(r.model || '').trim(), version: String(r.test_version || '').trim() || '1', pilot };
     }).filter(l => Object.keys(l.puzzles).length);
+  };
+
+  /** Linear-interpolation quantile of a numeric array (p in 0–1). */
+  S.quantile = function (a, p) {
+    const s = a.filter(isNum).sort((x, y) => x - y);
+    if (!s.length) return NaN;
+    const i = (s.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i);
+    return s[lo] + (s[hi] - s[lo]) * (i - lo);
+  };
+
+  /**
+   * What a small pilot needs to know before more features: how far people got, how they enjoyed it and
+   * judged its fairness, and whether their scores and styles spread out or pile up at the top.
+   * leaders: rows from aiGroupRows. Fields a results file lacks are left out of the counts.
+   */
+  S.pilotSummary = function (leaders) {
+    const P = leaders.map(l => l.pilot || {}), have = k => P.filter(x => isNum(x[k]));
+    const scores = have('teamScore').map(x => x.teamScore);
+    const bins = Array.from({ length: 10 }, (_, i) => ({ lo: i * 10, hi: i * 10 + 10, n: 0 }));
+    scores.forEach(x => { bins[Math.min(9, Math.max(0, Math.floor(x / 10)))].n++; });
+    const styles = new Map();
+    P.forEach(x => { if (x.style) styles.set(x.style, (styles.get(x.style) || 0) + 1); });
+    const rated = k => { const xs = have(k).map(x => x[k]); return { n: xs.length, mean: xs.length ? S.mean(xs) : NaN, low: xs.filter(x => x <= 2).length }; };
+    const withPlan = P.filter(x => isNum(x.planned) && isNum(x.done));
+    const tw = P.filter(x => isNum(x.twists) && x.twists > 0);
+    const top = scores.filter(x => x >= 95).length;
+    const res = {
+      n: leaders.length, scored: scores.length, bins,
+      median: S.quantile(scores, 0.5), q1: S.quantile(scores, 0.25), q3: S.quantile(scores, 0.75),
+      min: scores.length ? Math.min(...scores) : NaN, max: scores.length ? Math.max(...scores) : NaN, sd: scores.length > 1 ? S.sd(scores) : NaN,
+      top, topShare: scores.length ? top / scores.length : NaN,
+      styles: [...styles.entries()].sort((a, b) => b[1] - a[1]).map(([name, n]) => ({ name, n })),
+      fun: rated('fun'), fair: rated('fair'),
+      finished: { n: withPlan.length, all: withPlan.filter(x => x.done >= x.planned).length },
+      twists: { people: tw.length, met: tw.reduce((s, x) => s + (isNum(x.twistsMet) ? x.twistsMet : 0), 0), total: tw.reduce((s, x) => s + x.twists, 0) },
+      comments: P.map(x => x.comment).filter(Boolean)
+    };
+    // rough flags for the pilot, not statistical tests
+    res.flags = [];
+    if (scores.length >= 5 && res.topShare >= 0.5) res.flags.push('ceiling');
+    if (scores.length >= 5 && res.sd < 8) res.flags.push('narrow');
+    if (res.styles.length && res.styles[0].n / P.filter(x => x.style).length >= 0.6 && P.filter(x => x.style).length >= 5) res.flags.push('one-style');
+    if (res.fair.n >= 5 && res.fair.low / res.fair.n >= 0.3) res.flags.push('unfair');
+    return res;
   };
 
   S.aiGroup = function (leaders, opts) {

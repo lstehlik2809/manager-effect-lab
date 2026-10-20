@@ -202,5 +202,25 @@ check('scaling answers to 100 keeps proportions', () => {
   assert.strictEqual(S.scaleTo100([0, 0, 0, 0, 0]), null);
 });
 
+check('pilot summary: completion, ratings, score spread and styles from results files', () => {
+  const row = (score, style, fun, fair, done, met) => ({ name: 'P' + score + style, test_version: '5', engine: 'hosted', model: 'gemini-3.8-flash', team_score: score, t1_q1: score, t1_q2: score, t2_q1: score, t2_q2: score,
+    style, fun, fair, team_puzzles_planned: 2, team_puzzles_done: done, twists_met: met, twists_total: 2, comment: fun === 1 ? 'too long' : '' });
+  const rows = [row(100, 'The Briefer', 5, 5, 2, 2), row(100, 'The Briefer', 4, 4, 2, 1), row(98, 'The Briefer', 4, 2, 2, 1), row(96, 'The Briefer', 3, 1, 2, 0), row(70, 'The Collector', 1, 2, 1, 0), row(40, 'The Delegator', '', '', 1, 0)];
+  const P = S.pilotSummary(S.aiGroupRows(rows));
+  assert.strictEqual(P.n, 6); assert.strictEqual(P.top, 4);
+  assert.deepStrictEqual(P.finished, { n: 6, all: 4 });
+  assert.strictEqual(P.fun.n, 5); assert(Math.abs(P.fun.mean - 3.4) < 1e-9);
+  assert.strictEqual(P.fair.low, 3);
+  assert.deepStrictEqual(P.twists, { people: 6, met: 4, total: 12 });
+  assert.strictEqual(P.styles[0].name, 'The Briefer'); assert.strictEqual(P.styles[0].n, 4);
+  assert.strictEqual(P.bins[9].n, 4); assert.strictEqual(P.bins[4].n, 1);
+  assert.strictEqual(P.median, 97);
+  assert.deepStrictEqual(P.comments, ['too long']);
+  ['ceiling', 'one-style', 'unfair'].forEach(f => assert(P.flags.includes(f), f + ' in ' + P.flags));
+  // older results files without the pilot columns still load; their scores come from the puzzle columns
+  const old = S.pilotSummary(S.aiGroupRows([{ name: 'A', t1_q1: 50, t1_q2: 70 }]));
+  assert.strictEqual(old.median, 60); assert.strictEqual(old.fun.n, 0); assert.strictEqual(old.finished.n, 0);
+});
+
 console.log(failures ? failures + ' check(s) failed' : 'all checks passed');
 process.exit(failures ? 1 : 0);

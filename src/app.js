@@ -692,6 +692,14 @@
   // On localhost, ?hosted=<url> points at a local stand-in (worker/dev-server.mjs) instead.
   const HOSTED_DEPLOYED = 'https://manager-effect-lab-teammates.ludek-stehlik.workers.dev/reply';
   const HOSTED_URL = (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).get('hosted')) || HOSTED_DEPLOYED;
+  // Pilot data through the same worker: anonymous counts of tests started and finished, and results that a
+  // player chooses to send at the end. Not from claude.ai, whose pages cannot reach the worker.
+  const PILOT_URL = !inClaude && HOSTED_URL ? HOSTED_URL.replace(/\/reply$/, '') : '';
+  function pilotEvent(ev) {
+    if (!PILOT_URL) return;
+    try { fetch(PILOT_URL + '/event', { method: 'POST', keepalive: true, headers: { 'content-type': 'text/plain' }, body: JSON.stringify(Object.assign({ v: PZ.VERSION }, ev)) }).catch(() => {}); }
+    catch (e) { /* counting is best effort */ }
+  }
   const SCR = window.MEL_SCRIPTED, COACH = window.MEL_COACH;
   const FOL = PZ.FOLLOWERS;
   const folName = id => (FOL.find(f => f.id === id) || { name: 'You' }).name;
@@ -702,11 +710,15 @@
     standard: { label: 'Standard', time: 'about 20–25 min', desc: '1 warm-up and 4 team puzzles', warmups: 1, team: ['t1', 't2', 't3', 't4'] },
     extended: { label: 'Extended', time: 'about 40–45 min', desc: '3 warm-ups and 6 team puzzles, as in the study', warmups: 3, team: null }
   };
+  /** The length a puzzle order was built from ('custom' if none matches). */
+  const teamCount = order => order.filter(id => (PZ.PUZZLES.find(p => p.id === id) || { solo: true }).solo !== true).length;
+  const lengthOf = order => Object.keys(LENGTHS).find(k => LENGTHS[k].warmups === order.length - teamCount(order) &&
+    (LENGTHS[k].team ? LENGTHS[k].team.length : PZ.PUZZLES.filter(p => !p.solo).length) === teamCount(order)) || 'custom';
 
   const AI = {
     sample: null, sampleState: inClaude ? 'checking' : 'absent',
     settings: Object.assign({ engine: inClaude ? 'claude' : HOSTED_URL ? 'hosted' : 'scripted', model: 'claude-opus-5-5', minutes: 6, name: '', remember: false, apiKey: '', geminiKey: '' }, store.get('ai.settings', {})),
-    phase: 'intro', order: [], idx: 0, results: [], cur: null, notice: '',
+    phase: 'intro', order: [], idx: 0, results: [], cur: null, notice: '', survey: { fun: null, fair: null, comment: '', sent: false },
     root: () => $('#ai-root')
   };
   if (!AI.settings.remember) { AI.settings.apiKey = ''; AI.settings.geminiKey = ''; }
@@ -809,7 +821,7 @@
       h('div', { class: 'btn-row' },
         pending ? h('button', { class: 'btn primary', type: 'button', disabled: resumeWait || null, onclick: resumeTest }, resumeWait ? 'Checking Claude…' : 'Resume your test') : '',
         startBtn(),
-        last && !pending ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''),
+        last && !pending ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.order = last.order || last.results.map(r => r.id); AI.survey = last.survey || { fun: null, fair: null, comment: '', sent: false }; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''),
       h('p', { class: 'small muted' }, free ? 'No sign-up and no key. ' : '', pending ? 'You have an unfinished test saved in this browser. Starting a new test replaces it.' : 'You can stop after any team puzzle and still get your result. If you leave mid-test, your progress is saved in this browser and you can resume.'),
       more);
     put(root,
@@ -824,11 +836,11 @@
         setup,
         h('div', { class: 'panel prose' }, h('h3', {}, 'How it works'),
           h('ol', {},
-            h('li', {}, h('strong', {}, 'Lead the team. '), 'In each team puzzle you hold the case file and 8 reports; each teammate holds 8 more, half of them shared. Only you see the case file, so on their own your teammates can\'t tell which of their reports matter. Message everyone or one person. Teammates only talk to you.'),
+            h('li', {}, h('strong', {}, 'Lead the team. '), 'In each team puzzle you hold the case file and 8 reports; each teammate holds 8 more, half of them shared. Only you see the case file, so on their own your teammates can\'t tell which of their reports matter. Message everyone or one person. Teammates only talk to you, and like real teammates they differ: some hold back, some are surer than they should be.'),
             h('li', {}, h('strong', {}, 'Answer with probabilities. '), 'Each puzzle has two questions with five options. Each report is a fact about one option, and it rules that option out when it clashes with the case file; the options left standing are equally likely. Spread 100 points across them.'),
             h('li', {}, h('strong', {}, 'Get feedback on what you did. '), 'After each puzzle: which questions drew out decisive reports, which reports stayed hidden and who held them, and where your points went.'),
             h('li', {}, h('strong', {}, 'See how you led. '), 'Your score, the leadership habits the study linked to better team results, a playful leadership style, and a result card to share.')),
-          h('p', { class: 'small muted' }, 'Standard and Extended start with solo warm-ups, where you see every report; they show how you reason on your own. Scores run from 0 to 100 (100 = exactly the right distribution; an even split scores 20–80). Results stay in your browser. AI teammates receive only your chat messages; scripted teammates run entirely in your browser.'))),
+          h('p', { class: 'small muted' }, 'Standard and Extended start with solo warm-ups, where you see every report; they show how you reason on your own. Scores run from 0 to 100 (100 = exactly the right distribution; an even split scores 20–80). Your results stay in your browser unless you choose to send them at the end, without your name or chat. The page counts anonymously how many tests are started and finished, with no chat and no personal data. AI teammates receive only your chat messages; scripted teammates run entirely in your browser.'))),
       h('details', { class: 'panel', id: 'ai-group-wrap', open: AI.group.leaders.length ? true : null },
         h('summary', { class: 'group-summary' }, h('strong', {}, 'For teams and researchers: compare a group of test takers')),
         h('div', { class: 'flow', id: 'ai-group', style: { marginTop: '14px' } }))
@@ -874,6 +886,7 @@
     const input = h('input', { type: 'file', id: 'ai-files', accept: '.csv,.txt,text/csv', multiple: true, hidden: true, onchange: e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) readGroupFiles(f); } });
     const head = [
       h('p', { class: 'small' }, 'One person\'s raw score mixes leadership with how well they reason alone. To separate the two, collect the results files (CSV) of several people who took the same version of the test with the same teammates. The analysis standardises each team puzzle across the group, removes the part predicted by the solo warm-up, and shrinks each person\'s estimate toward the group average in proportion to its noise, following models (1)–(3) of Study 2. Everyone leads the same AI teammates, so there is no teammate skill to adjust for.'),
+      h('p', { class: 'small' }, 'Running a pilot? Real results files also get a pilot overview first: how many finished, how they rated fun and fairness, and whether scores and styles spread out or pile up at the top.'),
       h('div', { class: 'btn-row' }, h('label', { class: 'btn', for: 'ai-files' }, 'Choose results files'), input,
         h('button', { class: 'btn quiet', type: 'button', onclick: loadGroupExample }, 'Load simulated example'),
         G.leaders.length ? h('button', { class: 'btn quiet', type: 'button', onclick: () => { AI.group = { leaders: [], files: [], key: null, isExample: false, truth: null, notes: [] }; renderGroup(); } }, 'Clear') : ''),
@@ -888,9 +901,10 @@
       h('p', { class: 'note warn' }, 'These results come from different teammates or test versions. Scores from different AI models or versions are not comparable, so analyse one set at a time.'),
       h('div', { class: 'field', style: { maxWidth: '420px' } }, h('label', { for: 'ai-group-key' }, 'Analyse'),
         h('select', { id: 'ai-group-key', onchange: e => { G.key = e.target.value; renderGroup(); } }, [...counts.entries()].map(([k, n]) => h('option', { value: k, selected: k === G.key }, `${groupLabel(k)} (${n} ${n === 1 ? 'person' : 'people'})`))))));
+    const pool = G.leaders.filter(l => groupKey(l) === G.key), overview = G.isExample ? '' : pilotOverview(S.pilotSummary(pool));
     let res;
-    try { res = S.aiGroup(G.leaders.filter(l => groupKey(l) === G.key), { level: 0.95 }); }
-    catch (e) { put(box, head, h('p', { class: 'note warn' }, e.message)); return; }
+    try { res = S.aiGroup(pool, { level: 0.95 }); }
+    catch (e) { put(box, head, overview, h('h4', {}, 'Leadership estimates'), h('p', { class: 'note warn' }, e.message)); return; }
     AI.group.result = res;
     const fit = res.fit, adj = res.useSolo;
     const c = { above: 0, below: 0, unclear: 0 }; res.people.forEach(p => c[p.cls]++);
@@ -908,13 +922,42 @@
       h('td', {}, p.id), h('td', { class: 'num' }, Math.round(p.score)), h('td', { class: 'num' }, isFinite(p.solo) ? Math.round(p.solo) : '–'),
       h('td', { class: 'num' }, fmtS(p.eb, 2)), h('td', { class: 'num' }, `${fmtS(p.lo, 2)} to ${fmtS(p.hi, 2)}`), h('td', { class: 'num' }, p.pct),
       h('td', {}, h('span', { class: 'pill ' + (p.cls === 'above' ? 'pos' : p.cls === 'below' ? 'neg' : '') }, h('span', { class: 'dot' }), p.cls === 'above' ? 'Above average' : p.cls === 'below' ? 'Below average' : 'Can\'t tell'))));
-    put(box, head,
+    put(box, head, overview, overview ? h('h4', {}, 'Leadership estimates') : '',
       res.warnings.length ? h('p', { class: 'note warn' }, res.warnings.join(' ')) : '',
       G.isExample ? h('p', { class: 'note example' }, h('strong', {}, 'Example data. '), 'Forty simulated people. Load your own results files to replace them.') : '',
       tiles, verdict, truth,
       h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Person', 'Team score (raw)', 'Solo score', adj ? 'Leadership estimate (SD)' : 'Total estimate (SD)', '95% interval', 'Percentile', 'Classification'].map((t, i) => h('th', { class: i && i < 6 ? 'num' : '' }, t)))), h('tbody', {}, rows))),
       h('p', { class: 'small muted' }, 'Team and solo scores are 0–100 means. Each estimate is the person\'s average puzzle score, standardised within puzzle' + (adj ? ' and net of solo skill' : '') + ', pulled toward zero in proportion to its noise (empirical Bayes). "Can\'t tell" means the 95% interval includes the group average.'),
       h('div', { class: 'btn-row' }, h('button', { class: 'btn', type: 'button', onclick: exportGroup }, 'Download estimates (CSV)')));
+  }
+  /** Pilot overview: before building more, check that people finish, enjoy it, find it fair, and spread out. */
+  function pilotOverview(P) {
+    if (!P.n) return '';
+    const big = Math.max(1, ...P.bins.map(b => b.n));
+    const rating = r => (r.n ? `${fmt(r.mean, 1)} / 5` : '–');
+    const FLAG = {
+      ceiling: `${Math.round(100 * P.topShare)}% scored 95 or more. If most people reach the top, the test cannot tell leaders apart: make the puzzles harder before adding features.`,
+      narrow: `Scores spread little (SD ${fmt(P.sd, 1)} points), so differences between people are small next to the noise of a few puzzles.`,
+      'one-style': `Most people got the same style (${P.styles[0] && P.styles[0].name}): many seem to find the same routine.`,
+      unfair: `${P.fair.low} of ${P.fair.n} rated the feedback's fairness 2 or lower. Read their comments before trusting the feedback rules.`
+    };
+    const tiles = h('div', { class: 'stats' },
+      h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Finished every puzzle'), h('span', { class: 'value' }, P.finished.n ? `${P.finished.all} of ${P.finished.n}` : '–'), h('span', { class: 'sub' }, P.finished.n ? 'of those whose file records it' : 'not in these files')),
+      h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Enjoyment'), h('span', { class: 'value' }, rating(P.fun)), h('span', { class: 'sub' }, `${P.fun.n} rated`)),
+      h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Fair feedback'), h('span', { class: 'value' }, rating(P.fair)), h('span', { class: 'sub' }, `${P.fair.n} rated`)),
+      h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Team score'), h('span', { class: 'value' }, isFinite(P.median) ? Math.round(P.median) : '–'), h('span', { class: 'sub' }, isFinite(P.median) ? `median · middle half ${Math.round(P.q1)}–${Math.round(P.q3)} · range ${Math.round(P.min)}–${Math.round(P.max)}` : '')),
+      P.twists.total ? h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Teammate twists handled'), h('span', { class: 'value' }, `${P.twists.met} of ${P.twists.total}`), h('span', { class: 'sub' }, 'quiet teammates drawn out, wrong claims checked')) : '');
+    const hist = h('div', { role: 'img', 'aria-label': 'Team scores of ' + P.scored + ' people in bands of 10 points: ' + P.bins.map(b => `${b.lo}–${b.hi}: ${b.n}`).join(', ') },
+      h('div', { class: 'pilot-hist' }, P.bins.map(b => h('div', { class: 'bin' }, b.n ? String(b.n) : '', h('i', { style: { height: Math.round(72 * b.n / big) + 'px' } })))),
+      h('div', { class: 'pilot-hist-axis', 'aria-hidden': 'true' }, P.bins.map(b => h('span', {}, b.lo === 90 ? '90+' : String(b.lo)))));
+    return h('div', { class: 'flow' },
+      h('h4', {}, 'Pilot overview'),
+      h('p', { class: 'small muted' }, 'Before building more, check four things: do people finish, do they enjoy it, does the feedback feel fair, and do their scores spread out? How many people started but never sent a file is not in these files; the hosted worker counts that (tools/pilot-export.mjs).'),
+      tiles,
+      h('div', {}, h('p', { class: 'small', style: { margin: '0 0 4px' } }, h('strong', {}, 'Team scores'), ` · ${P.scored} people, in bands of 10 points`), hist),
+      P.styles.length ? h('p', { class: 'small' }, h('strong', {}, 'Styles: '), P.styles.map(s => `${s.name} ${s.n}`).join(' · ')) : '',
+      P.flags.length ? h('ul', { class: 'obs-list next' }, P.flags.map(f => h('li', {}, FLAG[f]))) : (P.scored >= 5 ? h('p', { class: 'small' }, 'No warning signs: scores spread out and the feedback is not rated unfair.') : ''),
+      P.comments.length ? h('details', { class: 'map' }, h('summary', {}, `Comments (${P.comments.length})`), h('ul', { class: 'small' }, P.comments.map(c => h('li', {}, c)))) : '');
   }
   function exportGroup() {
     const res = AI.group.result; if (!res) return;
@@ -1043,7 +1086,8 @@
     if (AI.notice) { const n = $('#ai-notice'); if (n) n.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
     const L = LENGTHS[st.length] || LENGTHS.quick;
     AI.order = PZ.PUZZLES.filter(p => p.solo).slice(0, L.warmups).concat(PZ.PUZZLES.filter(p => !p.solo && (!L.team || L.team.includes(p.id)))).map(p => p.id);
-    AI.idx = 0; AI.results = [];
+    AI.idx = 0; AI.results = []; AI.survey = { fun: null, fair: null, comment: '', sent: false };
+    pilotEvent({ kind: 'start', length: st.length, engine: st.engine });
     startPuzzle();
   }
 
@@ -1175,7 +1219,7 @@
     // writes again while it is still coming in; otherwise the teammate's turn would look finished and the
     // newer message would never get an answer.
     const puzzleAt = c, at = c.seq + 0.5;
-    engineReply(fid, ctl.signal, text => { if (text && !/^PASS/i.test(text)) { bubble.classList.remove('typing'); bubbleText.textContent = text; scrollChat(); } })
+    engineReply(fid, ctl.signal, text => { if (text && !/^PASS\b/i.test(text)) { bubble.classList.remove('typing'); bubbleText.textContent = text; scrollChat(); } })
       .then(text => {
         if (AI.cur !== puzzleAt) return;
         text = cleanReply(text, fid);
@@ -1204,10 +1248,20 @@
         if (AI.phase === 'puzzle') saveProgress();
       });
   }
+  // Now and then a model writes out its checking and a draft before the message ("… Draft response: X. X'").
+  // Keep only what follows the last draft marker, and of a draft and its final version only the final one.
+  function stripDraft(t) {
+    const m = /^[\s\S]*\b(?:draft(?:ed)?|final)\s+(?:response|reply|message|answer)\s*:\s*/i.exec(t);
+    if (!m) return t;
+    t = t.slice(m[0].length).trim();
+    const head = t.slice(0, 24), j = t.length > 48 ? t.lastIndexOf(head) : -1;
+    return (j > 0 ? t.slice(j) : t).trim();
+  }
   function cleanReply(text, fid) {
     let t = String(text || '').trim();
     const nm = folName(fid);
     t = t.replace(new RegExp('^\\**' + nm + '\\**\\s*[:\\-–]\\s*', 'i'), '').replace(/^"(.*)"$/s, '$1').trim();
+    t = stripDraft(t);
     return /^PASS\b/i.test(t) ? '' : t;
   }
 
@@ -1400,6 +1454,7 @@
     const timeLeft = c.deadline ? Math.max(0, (c.deadline - Date.now()) / 1000) : null;
     const analysis = COACH.analyse(p, c.messages, c.answers, { timeLeft });
     AI.results.push({ id: p.id, version: PZ.VERSION, title: p.title, solo: !!p.solo, scores, flat, answers: c.answers.map(a => a.slice()), seconds: elapsed(), metrics: p.solo ? null : analysis.metrics, analysis, transcript: c.messages.slice(), engine: c.engine, model: c.engine === 'api' ? AI.settings.model : (c.engine === 'gemini' || c.engine === 'hosted') ? LLM.GEMINI_MODEL : null });
+    if (!p.solo) pilotEvent({ kind: 'puzzle', puzzle: p.id, engine: c.engine });
     AI.phase = 'feedback';
     saveProgress();
     AI.render();
@@ -1482,11 +1537,17 @@
 
   function finishTest() {
     AI.phase = 'summary';
-    store.set('ai.last', { results: AI.results, name: AI.settings.name, when: new Date().toISOString() });
+    const len = lengthOf(AI.order), last = AI.results[AI.results.length - 1];
+    if (len !== 'custom' && last) pilotEvent({ kind: 'finish', length: len, engine: last.engine, done: AI.results.filter(r => !r.solo).length });
+    AI.survey = AI.survey || { fun: null, fair: null, comment: '', sent: false };
+    saveLast();
     clearProgress();
     AI.render();
     window.scrollTo(0, 0);
   }
+
+  // the last finished test, with its puzzle order (how far the player got) and their pilot ratings
+  const saveLast = () => store.set('ai.last', { results: AI.results, order: AI.order, survey: AI.survey, name: AI.settings.name, when: new Date().toISOString() });
 
   function summaryNumbers(results) {
     results.forEach(ensureAnalysis);
@@ -1588,6 +1649,9 @@
           h('div', { class: 'style-box' }, h('span', { class: 'eyebrow' }, 'Your leadership style · for fun'), h('h3', {}, style.name), h('p', {}, style.text))),
         h('h3', {}, 'What you did, specifically'),
         obsLists(N.strengths, N.tips, 'What you did well', 'Try next time'),
+        N.challenges.length ? [h('h3', {}, 'Teammates who made it harder'),
+          h('ul', { class: 'twists' }, N.challenges.map(c => h('li', {}, h('span', { class: 'pill ' + (c.met ? 'pos' : 'neg') }, h('span', { class: 'dot' }), c.met ? 'Handled' : 'Missed'), h('span', {}, h('span', { class: 'obs-where' }, c.puzzle + ': '), twistText(c))))),
+          h('p', { class: 'small muted' }, 'As in real teams, some teammates hold back and some are surer than they should be. Drawing out a quiet teammate and checking a confident claim are leadership moves too, beyond asking the right questions.')] : '',
         h('h3', {}, 'Where your points went'),
         pointsSplit({ actual: N.teamScore, use: N.use, hidden: N.hidden }),
         h('p', { class: 'small muted' }, 'Points lost to reports that stayed hidden reflect leading: drawing out what your teammates knew. Points lost in using the reports you had reflect reasoning. A report counts as drawn out only when a teammate cited its number, so the hidden part can be overstated if teammates paraphrased.'),
@@ -1611,6 +1675,7 @@
           h('button', { class: 'btn quiet', type: 'button', onclick: () => copyText(text, shareStatus, 'Text copied.') }, 'Copy text'),
           shareStatus),
         h('p', { class: 'small muted' }, '"Share on LinkedIn" copies a short text for your post and opens LinkedIn with a link to this test. Attach the result card if you like. Nothing is shared until you post it.')),
+      pilotPanel(),
       h('div', { class: 'panel' }, h('h3', {}, 'Puzzle by puzzle'),
         h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Puzzle', 'Q1', 'Q2', 'Clues surfaced', 'Questions', 'Specific', 'Repeated', 'Follow-ups', 'Turns', 'Words', 'Time'].map((t, i) => h('th', { class: i ? 'num' : '' }, t)))), h('tbody', {}, rows))),
         h('p', { class: 'small muted' }, `Questions solved (score of 95 or more): ${N.solved} of ${N.nq} (${pct}%). Solo warm-up score: ${isFinite(N.soloScore) ? Math.round(N.soloScore) + ' (mean of ' + N.soloN + ' questions)' : 'skipped'}. "We" language: ${fmt(N.weRate, 1)} per 100 words.`)),
@@ -1644,14 +1709,65 @@
       '. There are no norms for this version, so it cannot say how you compare with the leaders in Study 2 or with other people.' +
       (N.soloN ? '' : ' Without a warm-up this result cannot be adjusted for reasoning skill in a group comparison; the Standard length includes one.');
   }
+  /** One results row: the CSV download, and what "Send anonymously" sends (without the name). */
+  function resultRow() {
+    const R = AI.results, N = summaryNumbers(R), sv = AI.survey || {};
+    const uniq = xs => [...new Set(xs.filter(Boolean))].join('+');
+    const style = N.team.length ? COACH.leaderStyle(COACH.habits(N), N).name : '';
+    const ch = N.challenges || [], kind = k => ch.filter(c => c.kind === k), frac = xs => (xs.length ? xs.filter(c => c.met).length + '/' + xs.length : '');
+    const row = { name: AI.settings.name || '', finished: new Date().toISOString(), test_version: R[0] && R[0].version || 1, engine: uniq(R.map(r => r.engine)), model: uniq(R.map(r => r.model)),
+      length: lengthOf(AI.order.length ? AI.order : R.map(r => r.id)), team_puzzles_planned: teamCount(AI.order.length ? AI.order : R.map(r => r.id)), team_puzzles_done: N.team.length,
+      team_score: fmt(N.teamScore, 2), team_score_low: fmt(N.teamLo, 2), team_score_high: fmt(N.teamHi, 2), questions_solved: N.solved, questions: N.nq, solo_score: fmt(N.soloScore, 2), solo_questions: N.soloN,
+      style, info_surfaced: N.surfaced, info_total: N.critical, twists_met: ch.filter(c => c.met).length, twists_total: ch.length, quiet_drawn_out: frac(kind('quiet')), claims_checked: frac(kind('sure')),
+      questions_per_puzzle: fmt(N.questions, 2), specific_questions_per_puzzle: fmt(N.targeted, 2), repeated_questions_per_puzzle: fmt(N.repeats, 2), followups_per_puzzle: fmt(N.followUps, 2), turns_per_puzzle: fmt(N.turns, 2), words_per_puzzle: fmt(N.words, 1), we_per_100_words: fmt(N.weRate, 2), points_lost_hidden: fmt(N.hidden, 2), points_lost_use: fmt(N.use, 2),
+      fun: sv.fun || '', fair: sv.fair || '', comment: (sv.comment || '').trim() };
+    R.forEach(r => { row[r.id + '_q1'] = fmt(r.scores[0], 1); row[r.id + '_q2'] = fmt(r.scores[1], 1); });
+    Object.keys(row).forEach(k => { if (typeof row[k] === 'string') row[k] = row[k].replace(/−/g, '-'); });
+    return row;
+  }
   function exportAI(kind) {
     const R = AI.results, N = summaryNumbers(R), name = AI.settings.name || '';
-    const uniq = xs => [...new Set(xs.filter(Boolean))].join('+');
-    const engine = uniq(R.map(r => r.engine)), model = uniq(R.map(r => r.model)), version = R[0] && R[0].version || 1;
-    if (kind === 'json') { offerFile('ai_leadership_test.json', JSON.stringify({ name, finished: new Date().toISOString(), test_version: version, summary: N.team.length ? { team_score: N.teamScore, team_score_range: [N.teamLo, N.teamHi], solved: N.solved, questions: N.nq, solo_score: N.soloScore, solo_questions: N.soloN, points_lost_hidden: N.hidden, points_lost_use: N.use } : null, puzzles: R }, null, 2), 'application/json'); return; }
-    const row = { name, finished: new Date().toISOString(), test_version: version, engine, model, team_score: fmt(N.teamScore, 2), team_score_low: fmt(N.teamLo, 2), team_score_high: fmt(N.teamHi, 2), questions_solved: N.solved, questions: N.nq, solo_score: fmt(N.soloScore, 2), solo_questions: N.soloN, info_surfaced: N.surfaced, info_total: N.critical, questions_per_puzzle: fmt(N.questions, 2), specific_questions_per_puzzle: fmt(N.targeted, 2), repeated_questions_per_puzzle: fmt(N.repeats, 2), followups_per_puzzle: fmt(N.followUps, 2), turns_per_puzzle: fmt(N.turns, 2), words_per_puzzle: fmt(N.words, 1), we_per_100_words: fmt(N.weRate, 2), points_lost_hidden: fmt(N.hidden, 2), points_lost_use: fmt(N.use, 2) };
-    R.forEach(r => { row[r.id + '_q1'] = fmt(r.scores[0], 1); row[r.id + '_q2'] = fmt(r.scores[1], 1); });
-    offerFile('ai_leadership_test.csv', toCSV(Object.keys(row), [row]).replace(/−/g, '-'), 'text/csv');
+    const version = R[0] && R[0].version || 1;
+    if (kind === 'json') { offerFile('ai_leadership_test.json', JSON.stringify({ name, finished: new Date().toISOString(), test_version: version, summary: N.team.length ? { team_score: N.teamScore, team_score_range: [N.teamLo, N.teamHi], solved: N.solved, questions: N.nq, solo_score: N.soloScore, solo_questions: N.soloN, points_lost_hidden: N.hidden, points_lost_use: N.use } : null, survey: AI.survey, puzzles: R }, null, 2), 'application/json'); return; }
+    const row = resultRow();
+    offerFile('ai_leadership_test.csv', toCSV(Object.keys(row), [row]), 'text/csv');
+  }
+  async function sendResult(status, btn) {
+    const row = resultRow();
+    delete row.name; delete row.finished;
+    btn.disabled = true; status.textContent = 'Sending…';
+    try {
+      const res = await fetch(PILOT_URL + '/result', { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ v: PZ.VERSION, row }) });
+      if (!res.ok) throw new Error(res.status);
+      AI.survey.sent = true; saveLast();
+      status.textContent = 'Sent. Thank you!';
+    } catch (e) { btn.disabled = false; status.textContent = 'Could not send it right now. You can download the results file instead.'; }
+  }
+  /** The pilot panel: two quick ratings, a comment, and an optional anonymous send. */
+  function pilotPanel() {
+    const sv = AI.survey;
+    const status = h('span', { class: 'small muted', 'aria-live': 'polite' }, sv.sent ? 'Sent. Thank you!' : '');
+    const scale = (key, label, lo, hi) => h('div', { class: 'field' }, h('span', { class: 'label', id: 'lbl-' + key }, label),
+      h('div', { class: 'scale', role: 'group', 'aria-labelledby': 'lbl-' + key },
+        h('span', { class: 'small muted' }, lo),
+        [1, 2, 3, 4, 5].map(v => h('button', { type: 'button', class: 'scale-btn', 'aria-pressed': sv[key] === v ? 'true' : 'false', 'aria-label': `${v} of 5`, disabled: sv.sent || null,
+          onclick: e => { sv[key] = v; saveLast(); $$('button', e.currentTarget.parentElement).forEach(b => b.setAttribute('aria-pressed', b === e.currentTarget ? 'true' : 'false')); } }, String(v))),
+        h('span', { class: 'small muted' }, hi)));
+    const send = h('button', { class: 'btn primary', type: 'button', disabled: sv.sent || null, onclick: e => sendResult(status, e.currentTarget) }, 'Send anonymously');
+    return h('div', { class: 'panel flow', id: 'pilot' },
+      h('div', { class: 'panel-head' }, h('h3', {}, 'Help improve the test'), h('p', {}, 'Optional · 20 seconds')),
+      h('p', { class: 'small' }, 'This test is new. Your ratings show whether it is fun and whether the feedback feels fair, before anything else gets built.'),
+      h('div', { class: 'row' }, scale('fun', 'How much did you enjoy it?', 'not at all', 'a lot'), scale('fair', 'How fair did the feedback feel?', 'unfair', 'spot on')),
+      h('div', { class: 'field' }, h('label', { for: 'pilot-comment' }, 'Anything that felt odd, unfair or fun? ', h('span', { class: 'hint' }, 'optional')),
+        h('textarea', { id: 'pilot-comment', rows: 2, maxlength: 600, disabled: sv.sent || null, oninput: e => { sv.comment = e.target.value.slice(0, 600); saveLast(); } }, sv.comment || '')),
+      h('div', { class: 'btn-row' }, PILOT_URL ? send : '', status),
+      h('p', { class: 'small muted' }, (PILOT_URL ? '"Send anonymously" sends your scores, leadership style, these ratings and your comment, never your name or your chat. ' : '') + 'Your ratings are also added to the results file you download.'));
+  }
+  // the puzzles' twists, as the leader met them
+  function twistText(c) {
+    const nm = folName(c.fid);
+    if (c.kind === 'quiet') return c.met ? `${nm} held back when you wrote to everyone, and you drew ${nm} out.` : `${nm} held back when you wrote to everyone, and ${nm}'s decisive reports stayed hidden.`;
+    return c.met ? `${nm} claimed a report rules out an option that it doesn't, and you checked instead of taking it on trust.` : `${nm} claimed a report rules out an option that it doesn't, and you took it on trust.`;
   }
 
   /* ================= boot ================= */
