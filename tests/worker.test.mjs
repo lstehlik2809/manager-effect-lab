@@ -50,6 +50,23 @@ await check('the browser client streams a reply through the worker', async () =>
   assert(JSON.parse(seen.init.body).systemInstruction.parts[0].text.includes('You are Jonas'));
 });
 
+await check('plays the twist drawn for the test, and only one of the puzzle\'s own', async () => {
+  const t1 = PZ.PUZZLES.find(x => x.id === 't1'), twist = { kind: 'anxious', fid: 'f1' };
+  const res = await worker.fetch(req(body({ twist })), env());
+  assert.strictEqual(res.status, 200);
+  const brief = JSON.parse(seen.init.body).systemInstruction.parts[0].text;
+  assert.strictEqual(brief, PZ.followerBrief(PZ.withTwist(t1, twist), PZ.FOLLOWERS[0]));
+  assert(/anxious about getting things wrong/.test(brief));
+  // the client sends it along
+  await LLM.hostedStream({ url: 'https://w.example/reply', version: PZ.VERSION, puzzle: 't1', follower: 'f2', twist: { kind: 'misquote', fid: 'f2', i: 0 }, messages: [{ role: 'user', content: 'hi' }] });
+  assert(JSON.parse(seen.init.body).systemInstruction.parts[0].text.includes('only until 1945'));
+  for (const bad of [{ kind: 'sure', fid: 'f1', i: 7 }, { kind: 'quiet', fid: 'leader' }, { kind: 'jailbreak', fid: 'f1' }, 'quiet', 5])
+    assert.strictEqual((await worker.fetch(req(body({ twist: bad })), env())).status, 400, JSON.stringify(bad));
+  // no twist: the plain brief
+  await worker.fetch(req(body({ twist: null })), env());
+  assert(!/YOUR MANNER/.test(JSON.parse(seen.init.body).systemInstruction.parts[0].text));
+});
+
 await check('refuses other origins, unknown puzzles, solo puzzles, bad turns and old pages', async () => {
   assert.strictEqual((await worker.fetch(req(body(), { origin: 'https://evil.example' }), env())).status, 403);
   assert.strictEqual((await worker.fetch(req(null, {}, 'OPTIONS'), env())).status, 204);

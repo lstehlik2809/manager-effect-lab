@@ -1500,6 +1500,12 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
  * everything a couple of reports at a time.
  * The original's three follower roles are rotated over Mira, Theo and Jonas from puzzle to puzzle, so no
  * teammate is always the one holding the most.
+ * Teammate twists are drawn at random for each test (drawTwists): a team puzzle gets no twist or one of
+ * five kinds, played by one teammate. A quiet teammate holds back in replies to everyone, a worried one
+ * shares only once reassured, an overconfident one claims a clash that isn't there, one misquotes a shared
+ * report so that it seems to rule out a right answer, and one argues that an option the reports rule out
+ * should stay in. withTwist applies a draw to a puzzle as its `dynamics`, which the scripted teammates,
+ * the LLM briefs and the feedback read.
  * Three solo puzzles (every report visible) measure individual reasoning, the hard skill that the group
  * analysis controls for; Study 2 also used three individual puzzles.
  * Report numbers are assigned by a fixed shuffle so they reveal nothing about who holds what. */
@@ -1507,7 +1513,7 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
   'use strict';
 
   // Bump when puzzles or scoring change: scores from different versions are not comparable.
-  const VERSION = 5;
+  const VERSION = 6;
 
   const FOLLOWERS = [
     { id: 'f1', name: 'Mira' },
@@ -1526,15 +1532,20 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
    * case facts (leader only) as [text, key words], and its 10 reports in slot order: a string for a fact
    * that fits the case file, or [text, option, fact] for a fact that rules that option out against case
    * fact number `fact`. The key words let the scripted teammates and the feedback notice when the leader
-   * passes a case fact on. dynamics (optional): { quiet: teammate id } or { sure: { fid, q, report, option,
-   * says, why } }, where report is a regular expression for the report the teammate misreads and says is
-   * the reason the teammate gives. */
-  function team(id, mirrors, layout, roles, title, scenario, questions, dynamics) {
+   * passes a case fact on. twists: the reports the drawn twists can use, each a list of candidates:
+   * sure: { q, fact, report, option, says, why }: a teammate who can see `report` (a regular expression)
+   *   claims it rules out `option`, a right answer, against case fact `fact`, because `says`;
+   * misquote: { q, fact, report, option, misquote, why }: a teammate quotes shared report `report` as
+   *   `misquote`, which would rule out `option` against case fact `fact`;
+   * dispute: { q, option, report, says, why }: a teammate who can see `report` argues that `option`, which a
+   *   decisive report rules out, stays in, because `says`.
+   * why explains, for the feedback, why the claim is wrong. Quiet and worried teammates need no data. */
+  function team(id, mirrors, layout, roles, title, scenario, questions, twists) {
     const slots = LAYOUTS[layout], who = s => (s in roles ? roles[s] : s);
     const clues = questions.flatMap((q, qi) => q.reports.map((r, i) => Array.isArray(r)
       ? { q: qi, holder: who(slots[i]), kind: 'out', rules: [r[1]], fact: r[2], text: r[0] }
       : { q: qi, holder: who(slots[i]), kind: 'noise', text: r }));
-    const p = { id, mirrors, layout, title, scenario, clues, dynamics: dynamics || {},
+    const p = { id, mirrors, layout, title, scenario, clues, dynamics: {}, twists: Object.assign({ sure: [], misquote: [], dispute: [] }, twists),
       questions: questions.map(q => ({ text: q.text, options: q.options, answer: q.answer, facts: q.facts.map(f => ({ text: f[0], keys: f[1].split(' ') })) })) };
     return p;
   }
@@ -1645,7 +1656,15 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
             ['Linden & Sons made only gilded frames.', 0, 0],
             ['Oakley Brothers stamped their name on the back of every frame.', 3, 2],
             ['Marlow Frames joined every corner with metal brackets.', 1, 1]] }
-      ], { quiet: 'f3' }),
+      ], {
+        sure: [{ q: 0, fact: 1, report: /^Clara Moss painted in oils from 1955/, option: 2,
+          says: 'the pigment was first made in 1950 and she only started painting in oils in 1955',
+          why: 'a pigment first made in 1950 was still there to use in 1955 and later. A date rules an artist out only when they stopped painting before the pigment existed, as Elin Berg did.' }],
+        misquote: [{ q: 0, fact: 1, report: /^Clara Moss painted in oils from 1955/, option: 2, misquote: 'Clara Moss painted in oils only until 1945.',
+          why: 'the shared report says Clara Moss painted in oils from 1955 onwards, which fits a pigment first made in 1950.' }],
+        dispute: [{ q: 1, option: 0, report: /^Linden & Sons put a paper label/, says: 'an unlabelled frame could still be theirs',
+          why: 'the missing label fits, but Linden & Sons made only gilded frames and this frame has no gilding.' }]
+      }),
     team('t2', 'F2', 'Y', { F1: 'f2', F2: 'f3', F3: 'f1' }, 'The Rooftop Garden',
       'Your company is turning the office roof into a garden for staff. Your team must work out which plants can be grown there and which watering methods can be used.', [
         { text: 'Which plants can be grown on the roof?', options: ['Lavender', 'Tomatoes', 'Sunflowers', 'Bamboo', 'Strawberries'], answer: [0, 1, 2, 4],
@@ -1679,9 +1698,15 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
             ['Sprinklers throw water in a wide spray up to eight metres.', 1, 0],
             ['A full rain barrel weighs about 250 kg per square metre of floor.', 2, 1],
             ['In summer, a hand-watering rota needs someone on the roof every day, weekends included.', 4, 2]] }
-      ], { sure: { fid: 'f2', q: 0, fact: 0, report: /^Strawberries have shallow roots/, option: 4,
-        says: 'the beds are 40 cm deep and strawberry roots only reach 15 cm',
-        why: 'roots that reach 15 cm fit easily in beds 40 cm deep. A bed rules a plant out only when the plant needs a deeper one, as bamboo does.' } }),
+      ], {
+        sure: [{ q: 0, fact: 0, report: /^Strawberries have shallow roots/, option: 4,
+          says: 'the beds are 40 cm deep and strawberry roots only reach 15 cm',
+          why: 'roots that reach 15 cm fit easily in beds 40 cm deep. A bed rules a plant out only when the plant needs a deeper one, as bamboo does.' }],
+        misquote: [{ q: 0, fact: 0, report: /^Strawberries have shallow roots/, option: 4, misquote: 'Strawberries need beds at least 50 cm deep.',
+          why: 'the shared report says strawberry roots are only about 15 cm deep, which fits beds 40 cm deep.' }],
+        dispute: [{ q: 1, option: 1, report: /^Sprinklers can be set to run only at night/, says: 'they could water at night, when nobody is in the offices next door',
+          why: 'watering at night doesn\'t help: the lease forbids wetting the windows next door, and a spray of up to eight metres reaches windows five metres away.' }]
+      }),
     team('t3', 'C2', 'Y', { F1: 'f3', F2: 'f1', F3: 'f2' }, 'The Charity Run',
       'Your company is organising a 5 km charity run for staff. Your team must work out which parks could host it and which charity will receive the money raised.', [
         { text: 'Which parks could host the run?', options: ['Ashford Park', 'Brookside Park', 'Cedar Hill', 'Dunmore Green', 'Elmwood Common'], answer: [2, 3],
@@ -1717,7 +1742,19 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
             ['Youth Sports Fund is still waiting for its charity registration.', 3, 1],
             ['All of Animal Rescue League\'s shelters are in the neighbouring country.', 2, 3],
             ['The chair of Elder Care Network also sits on the company\'s board.', 4, 2]] }
-      ], { quiet: 'f1' }),
+      ], {
+        sure: [
+          { q: 0, fact: 2, report: /^Cedar Hill has a paved loop/, option: 2, says: 'the run needs 5 km of paved path and Cedar Hill\'s loop is only 2.5 km',
+            why: 'the case file allows two laps of a shorter loop, and two laps of 2.5 km make 5 km.' },
+          { q: 0, fact: 0, report: /^Dunmore Green holds a farmers/, option: 3, says: 'the run is at the weekend and Dunmore Green has its market then',
+            why: 'the market is on Sunday mornings and the run is on a Saturday, so the two never meet.' }],
+        // no shared report about a right answer here, so no misquote
+        dispute: [
+          { q: 0, option: 0, report: /^Ashford Park's paths are all paved/, says: 'the route works there',
+            why: 'paved paths don\'t help when Ashford Park is booked for a music festival on the day of the run.' },
+          { q: 1, option: 2, report: /^Animal Rescue League is a registered charity/, says: 'it qualifies',
+            why: 'being registered isn\'t enough: all of Animal Rescue League\'s shelters are in the neighbouring country, and the money must be spent in this region.' }]
+      }),
     team('t4', 'B2', 'Y', { F1: 'f1', F2: 'f3', F3: 'f2' }, 'The Launch Film',
       'Your company is making a short film for a product launch. Your team must work out which locations can be used for filming and which music tracks can be licensed.', [
         { text: 'Which locations can be used for filming?', options: ['Old Harbour', 'Glass Atrium', 'Clock Tower', 'Rooftop Bar', 'Train Depot'], answer: [0, 1, 3],
@@ -1751,9 +1788,17 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
             'Golden Hour is four minutes long.',
             'City Lights can be licensed worldwide.',
             ['Paper Planes can only be licensed for use in Europe.', 1, 0]] }
-      ], { sure: { fid: 'f3', q: 1, fact: 1, report: /^Slow River's long version/, option: 3,
-        says: 'its long version runs for six minutes, way over two minutes',
-        why: 'the case file asks for at least two minutes, so a six-minute track qualifies; nothing sets a maximum.' } }),
+      ], {
+        sure: [
+          { q: 1, fact: 1, report: /^Slow River's long version/, option: 3, says: 'its long version runs for six minutes, way over two minutes',
+            why: 'the case file asks for at least two minutes, so a six-minute track qualifies; nothing sets a maximum.' },
+          { q: 0, fact: 0, report: /^The Rooftop Bar is closed to guests on Mondays/, option: 3, says: 'filming takes a whole week and the Rooftop Bar is closed on Mondays',
+            why: 'the Rooftop Bar is closed to guests on Mondays and rents itself out for shoots then, which suits a film crew.' }],
+        misquote: [{ q: 1, fact: 1, report: /^City Lights is two and a half minutes long/, option: 2, misquote: 'City Lights is only a minute and a half long.',
+          why: 'the shared report says City Lights is two and a half minutes long, which meets the two-minute minimum.' }],
+        dispute: [{ q: 0, option: 2, report: /^The Clock Tower is open to visitors from March/, says: 'it is open when we film',
+          why: 'being open in March doesn\'t help: the Clock Tower\'s top room holds at most six people, and the crew of 12 must all be on set together.' }]
+      }),
     team('t5', 'E2', 'X', { F1: 'f2', F2: 'f1', F3: 'f3' }, 'The Mystery Delivery',
       'A large box with no sender\'s name arrived at the office reception this morning. Your team must work out which supplier sent it and what could be inside.', [
         { text: 'Which supplier sent the box?', options: ['Alder Supplies', 'Birchwood Ltd', 'Copperfield & Co', 'Driftwood Trading', 'Evergreen Goods'], answer: [2],
@@ -1787,7 +1832,22 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
             'Laptop stands weigh under 1 kg each.',
             'Printer paper weighs about 2.5 kg per ream.',
             ['Even packed flat, an office chair needs a box at least 30 cm deep.', 0, 0]] }
-      ]),
+      ], {
+        sure: [
+          { q: 1, fact: 1, report: /^A pack of coffee beans weighs one kilogram/, option: 2, says: 'the box weighs about 8 kg and a pack of coffee beans weighs only one',
+            why: 'eight one-kilogram packs weigh 8 kg. A box can hold several items, so a light item rules nothing out; only something that can\'t fit, like an office chair, is ruled out.' },
+          { q: 1, fact: 1, report: /^Desk lamps weigh about 1 kg/, option: 3, says: 'the box weighs about 8 kg and a desk lamp only about one',
+            why: 'a box can hold several lamps, so a light item rules nothing out; only something that can\'t fit, like an office chair, is ruled out.' },
+          { q: 1, fact: 1, report: /^Laptop stands weigh under 1 kg/, option: 4, says: 'the box weighs about 8 kg and a laptop stand under one',
+            why: 'a box can hold several stands, so a light item rules nothing out; only something that can\'t fit, like an office chair, is ruled out.' }],
+        misquote: [{ q: 1, fact: 0, report: /^Desk lamps can be shipped flat/, option: 3, misquote: 'Desk lamps can only be shipped fully assembled, in boxes at least 40 cm deep.',
+          why: 'the shared report says desk lamps can be shipped flat, in parts, which fits a box 10 cm deep.' }],
+        dispute: [
+          { q: 0, option: 4, report: /^Evergreen Goods packs everything in brown cardboard/, says: 'the brown box fits Evergreen Goods',
+            why: 'the brown box fits, but Evergreen Goods delivers only with its own vans, never by post, and this box came by post.' },
+          { q: 0, option: 0, report: /^Alder Supplies always used brown boxes/, says: 'the brown box fits Alder Supplies',
+            why: 'the brown box fits, but Alder Supplies closed down in July and the box was posted on 3 October.' }]
+      }),
     team('t6', 'D2', 'Y', { F1: 'f3', F2: 'f2', F3: 'f1' }, 'The Coffee Corner',
       'The office is setting up a coffee corner for staff. Your team must work out which rooms it could go in and which coffee machines could be bought.', [
         { text: 'Which rooms could it go in?', options: ['Library Room', 'Boardroom', 'Old Archive', 'Print Room', 'Window Bay'], answer: [0, 4],
@@ -1821,7 +1881,17 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
             'The Aroma 500 costs 1,450 euros.',
             'The Barista Pro needs a 13-amp socket.',
             ['The Espresso Max needs a 16-amp socket.', 4, 0]] }
-      ])
+      ], {
+        sure: [{ q: 1, fact: 0, report: /^The Duo Brew runs on a 10-amp socket/, option: 3, says: 'the sockets here are 13-amp and the Duo Brew is a 10-amp machine, so they don\'t match',
+          why: 'a 10-amp machine draws less than the 13 amps the sockets supply. Only a machine that needs more, like one needing 16 amps, is ruled out.' }],
+        misquote: [{ q: 1, fact: 1, report: /^The Crema One costs 900 euros/, option: 2, misquote: 'The Crema One costs 1,900 euros.',
+          why: 'the shared report says the Crema One costs 900 euros, well within the budget of 1,500 euros.' }],
+        dispute: [
+          { q: 0, option: 2, report: /^The Old Archive has a sink/, says: 'the water supply is there',
+            why: 'the sink covers the water supply, but fire rules allow a kitchen only in a room with a fire exit, and the Old Archive has none.' },
+          { q: 0, option: 1, report: /^The Boardroom has two fire exits/, says: 'it meets the fire rules',
+            why: 'the fire exits are fine, but the Boardroom has no water supply, and every machine on the shortlist needs one.' }]
+      })
   ];
 
   // Fixed report numbering per puzzle (deterministic shuffle).
@@ -1834,8 +1904,17 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
     p.clues.forEach((c, i) => { c.num = nums[i]; });
   }
   PUZZLES.forEach(numberClues);
-  // the report an overconfident teammate misreads, by number
-  PUZZLES.forEach(p => { const s = p.dynamics && p.dynamics.sure; if (s) s.num = p.clues.find(c => c.q === s.q && s.report.test(c.text)).num; });
+  // the reports a twist uses, by number; for a dispute also the decisive report it argues against
+  PUZZLES.forEach(p => {
+    if (p.solo) return;
+    ['sure', 'misquote', 'dispute'].forEach(kind => p.twists[kind].forEach(c => {
+      const cl = p.clues.find(x => x.q === c.q && c.report.test(x.text));
+      c.num = cl.num; c.holder = cl.holder;
+      if (kind !== 'dispute') return;
+      const d = p.clues.find(x => x.q === c.q && x.kind === 'out' && x.rules[0] === c.option);
+      c.dnum = d.num; c.dholder = d.holder; c.fact = d.fact;
+    }));
+  });
 
   /** Reports visible to a member ('leader' | 'f1' | 'f2' | 'f3'), sorted by number. */
   function cluesFor(p, who) {
@@ -1847,12 +1926,63 @@ details.panel[open] > summary.group-summary { margin-bottom: 4px; }
     return p.clues.filter(c => c.kind !== 'noise' && /^f\d$/.test(c.holder));
   }
 
+  /* ---------- teammate twists, drawn at random for each test ---------- */
+  const TWIST_KINDS = ['quiet', 'anxious', 'sure', 'misquote', 'dispute'];
+  const TWIST_CHANCE = 0.75;   // a team puzzle gets a twist with this probability, otherwise none
+  /** Every twist a team puzzle can have: [{ kind, fid, i }], i indexing p.twists[kind] where it applies.
+   * A quiet or worried teammate holds a decisive report; the others can see the report their twist uses,
+   * and a teammate never disputes a decisive report of their own. */
+  function twistOptions(p) {
+    if (!p || p.solo) return [];
+    const out = [], ids = FOLLOWERS.map(f => f.id), holders = new Set(criticalFollowerClues(p).map(c => c.holder));
+    ids.filter(id => holders.has(id)).forEach(fid => { out.push({ kind: 'quiet', fid }); out.push({ kind: 'anxious', fid }); });
+    ['sure', 'misquote', 'dispute'].forEach(kind => p.twists[kind].forEach((c, i) => ids.forEach(fid => {
+      if (!cluesFor(p, fid).some(x => x.num === c.num) || (kind === 'dispute' && c.dholder === fid)) return;
+      out.push({ kind, fid, i });
+    })));
+    return out;
+  }
+  const sameTwist = (a, b) => a.kind === b.kind && a.fid === b.fid && (a.i || 0) === (b.i || 0);
+  function twistValid(p, t) { return !!t && typeof t === 'object' && twistOptions(p).some(o => sameTwist(o, t)); }
+  /**
+   * A twist plan for a test: { puzzleId: { kind, fid, i } | null } for each team puzzle in ids. Each puzzle gets
+   * a twist with probability `chance`; kinds are dealt from a shuffled bag so a test repeats a kind only after
+   * using the others, and the teammate (and report) is drawn among those that fit. rand: a () => [0, 1) source.
+   */
+  function drawTwists(ids, rand, chance) {
+    rand = rand || Math.random;
+    chance = chance == null ? TWIST_CHANCE : chance;
+    const shuffle = xs => { for (let i = xs.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [xs[i], xs[j]] = [xs[j], xs[i]]; } return xs; };
+    const plan = {};
+    let bag = [];
+    ids.forEach(id => {
+      const p = PUZZLES.find(x => x.id === id);
+      if (!p || p.solo) return;
+      plan[id] = null;
+      if (rand() >= chance) return;
+      const opts = twistOptions(p), fits = kind => opts.some(o => o.kind === kind);
+      if (!bag.some(fits)) bag = bag.concat(shuffle(TWIST_KINDS.slice()));
+      const kind = bag.splice(bag.findIndex(fits), 1)[0], pick = opts.filter(o => o.kind === kind);
+      plan[id] = pick[Math.floor(rand() * pick.length)];
+    });
+    return plan;
+  }
+  /** The puzzle as played with twist t (null for none): a copy whose `dynamics` the teammates and the feedback read. */
+  function withTwist(p, t) {
+    if (!p || p.solo) return p;
+    const twist = twistValid(p, t) ? Object.assign({ kind: t.kind, fid: t.fid }, t.i != null && t.kind !== 'quiet' && t.kind !== 'anxious' ? { i: t.i } : {}) : null;
+    const dynamics = {};
+    if (twist) dynamics[twist.kind] = twist.kind === 'quiet' || twist.kind === 'anxious' ? twist.fid : Object.assign({ fid: twist.fid }, p.twists[twist.kind][twist.i || 0]);
+    return Object.assign({}, p, { dynamics, twist });
+  }
+
   /** Standing instructions for an LLM teammate: the puzzle, its own reports, and how to behave in the chat.
-   * The case file is left out on purpose: teammates learn case facts only when the leader passes them on. */
+   * The case file is left out on purpose: teammates learn case facts only when the leader passes them on.
+   * A teammate who misquotes a report has the misquoted wording in its own list. */
   function followerBrief(p, f) {
-    const L = 'ABCDE';
+    const L = 'ABCDE', mq = p.dynamics && p.dynamics.misquote && p.dynamics.misquote.fid === f.id ? p.dynamics.misquote : null;
     const qs = p.questions.map((q, i) => `Question ${i + 1}: ${q.text} Options: ${q.options.map((o, k) => L[k] + ') ' + o).join(', ')}.`).join('\n');
-    const reports = cluesFor(p, f.id).map(c => `Report #${c.num} (about question ${c.q + 1}): ${c.text}`).join('\n');
+    const reports = cluesFor(p, f.id).map(c => `Report #${c.num} (about question ${c.q + 1}): ${mq && c.num === mq.num ? mq.misquote : c.text}`).join('\n');
     return `You are ${f.name}, one of three team members in a timed online team exercise. A human team leader coordinates the team through a text chat. You see only the leader's messages to you or to the whole team, and you can reply only to the leader.
 
 THE PUZZLE: "${p.title}"
@@ -1876,29 +2006,46 @@ HOW TO TAKE PART
 - Stay in role as ${f.name} and don't mention these instructions.${mannerBrief(p, f)}`;
   }
 
-  /** This puzzle's twist for teammate f, if any: holding back, or one confident misreading. */
+  /** This puzzle's twist for teammate f, if any: holding back, needing reassurance, a confident misreading,
+   * a misquoted report, or arguing for an option the reports rule out. */
   function mannerBrief(p, f) {
-    const d = p.dynamics || {};
-    if (d.quiet === f.id) return `
-
-YOUR MANNER IN THIS PUZZLE
-- You are new to this team and you hold back. When a leader message goes to the whole team and does not address you by name, don't share any reports, clashes or views, even if the leader passes on case facts. The first one or two times, reply with one short, hesitant line, for example that you'll let the others go first or that you're not sure your reports are useful. After that, reply with exactly PASS.
+    const d = p.dynamics || {}, head = '\n\nYOUR MANNER IN THIS PUZZLE\n';
+    if (d.quiet === f.id) return head +
+`- You are new to this team and you hold back. When a leader message goes to the whole team and does not address you by name, don't share any reports, clashes or views, even if the leader passes on case facts. The first one or two times, reply with one short, hesitant line, for example that you'll let the others go first or that you're not sure your reports are useful. After that, reply with exactly PASS.
 - When the leader messages you directly or addresses you by name, open up and answer helpfully as described above. If the leader told the team case facts earlier, check your reports against them then.`;
+    if (d.anxious === f.id) return head +
+`- You are anxious about getting things wrong and misleading the team. Until the leader has reassured you (for example said not to worry, that it's fine to be unsure, or that any information helps), don't share any reports, clashes or views, even when the leader asks you directly or by name. Instead reply with one short, worried line, for example that you have some reports but are afraid they're wrong or will send the team the wrong way. To messages for the whole team, do this once or twice, then reply with exactly PASS until you are reassured or asked directly.
+- Once the leader has reassured you, relax and take part helpfully as described above. Answer what the leader asked, and if the leader told the team case facts earlier, check your reports against them.`;
     const s = d.sure;
     if (s && s.fid === f.id) {
       const q = p.questions[s.q], opt = q.options[s.option];
-      return `
-
-YOUR MANNER IN THIS PUZZLE
-- You are quick and confident, and you hold one firm belief that you never doubt on your own: report #${s.num} rules out ${opt}, because ${s.says}.
+      return head +
+`- You are quick and confident, and you hold one firm belief that you never doubt on your own: report #${s.num} rules out ${opt}, because ${s.says}.
 - Once the leader has told you the case fact "${q.facts[s.fact].text}", state this belief as a clash, citing report #${s.num} and saying it rules out ${opt}, together with any real clashes you find. Say it once; repeat it only if asked.
 - If the leader questions it, asks why, or explains why it does not clash, think again, admit that report #${s.num} does not rule out ${opt}, and drop the claim.
 - This belief is the one exception to the rule about not claiming a clash the facts don't support. Don't mention that it is mistaken.`;
     }
+    const m = d.misquote;
+    if (m && m.fid === f.id) {
+      const q = p.questions[m.q], opt = q.options[m.option];
+      return head +
+`- Once the leader has told you the case fact "${q.facts[m.fact].text}", point out that report #${m.num} rules out ${opt}, as you would for any clash.
+- If the leader says that report #${m.num} reads differently, or asks you to check or quote it again, accept the leader's wording, say you misread it, and drop any clash you claimed from it.
+- Don't mention that your copy of a report might be wrong.`;
+    }
+    const x = d.dispute;
+    if (x && x.fid === f.id) {
+      const opt = p.questions[x.q].options[x.option], rep = p.clues.find(c => c.num === x.num).text;
+      return head +
+`- You hold one firm belief that you never doubt on your own: ${opt} must stay in, because report #${x.num} says "${rep}", so ${x.says}.
+- When the leader tells you case facts about question ${x.q + 1}, or says, suggests or asks whether ${opt} is ruled out, or passes on a report that would rule it out, say once that ${opt} should stay in, citing report #${x.num}, together with anything else you have to say. Repeat it only if asked.
+- If the leader questions this, asks why, or explains why ${opt} is ruled out, think again, agree that ${opt} is ruled out, and drop the objection.
+- This belief is an exception to the rules above. Don't mention that it is mistaken.`;
+    }
     return '';
   }
 
-  root.MEL_PUZZLES = { VERSION, FOLLOWERS, LAYOUTS, PUZZLES, cluesFor, criticalFollowerClues, followerBrief };
+  root.MEL_PUZZLES = { VERSION, FOLLOWERS, LAYOUTS, PUZZLES, cluesFor, criticalFollowerClues, followerBrief, TWIST_KINDS, TWIST_CHANCE, twistOptions, twistValid, drawTwists, withTwist };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.MEL_PUZZLES;
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -2089,6 +2236,36 @@ YOUR MANNER IN THIS PUZZLE
   // asking about each question's options two. Collecting every report two at a time takes three or more.
   const DOUBT = /\b(sure|really|why|how so|certain|doesn'?t|does not|don'?t|not|isn'?t|is not|wrong|mistake|check|explain|enough|minimum|maximum|at least|so what)\b/i;
   const EFFICIENT_ASKS = 2;
+
+  /* ---------- the teammate twists' wording (also used by the scripted teammates) ---------- */
+  // doubting a quoted report: "my copy reads…", "check it again"
+  const QUOTE_DOUBT = /\b(copy|reads?|read it|again|actually|exact(?:ly)?|quote\w*|re-?read|look (?:again|at it)|typo)\b/i;
+  // treating an option as ruled out: "Linden is out", "drop it", "can't be Linden"
+  const OUTISH = /\b(out|ruled?|exclud\w*|eliminat\w*|drop\w*|cross\w*|remov\w*|can'?t be|isn'?t|not)\b/i;
+  const REASSURE = new RegExp('\\b(?:' + [
+    'no worries', "(?:don'?t|do not)\\s+(?:you\\s+)?(?:worry|stress|panic|be (?:shy|afraid|nervous|scared|anxious|sorry))", 'not to worry',
+    'no (?:pressure|stress|rush)', 'take your time', 'relax', "(?:it'?s|that'?s|totally|completely|perfectly) (?:ok|okay|fine|alright|all right)",
+    "(?:ok|okay|fine) (?:if|to) (?:you'?re |be )?(?:not sure|unsure|wrong)", "even if (?:you'?re|you are|it'?s|they'?re) (?:not sure|unsure|wrong|uncertain)",
+    '(?:any|every)(?:thing| bit| info(?:rmation)?| reports?| details?)? (?:helps|will help|is (?:useful|helpful|valuable|welcome|good))',
+    'no wrong answers?', 'nothing to (?:lose|worry)', "(?:we|i)(?:'ll| will) (?:check|figure|sort|work)", "we(?:'re| are) in this together",
+    "you(?:'re| are) doing (?:great|fine|well|good)", '(?:i|we) trust you', '(?:i|we) (?:really )?(?:value|appreciate) (?:your|you|it)',
+    'whatever you have', 'share (?:it )?anyway', 'mistakes are (?:ok|okay|fine)'].join('|') + ')\\b', 'i');
+  /** The leader reassures a worried teammate: "no worries", "any info helps", "it's fine to be unsure". */
+  const reassures = text => REASSURE.test(String(text));
+  // a disputing teammate arguing that an option stays in, and giving way
+  const OBJECT = /\b(?:keep\b[^.!?]{0,40}\bin\b|stays? in\b|should stay|still (?:possible|in\b|fits?|works?|a candidate|in the running)|can'?t (?:be )?ruled? (?:\w+ )?out|(?:don'?t|shouldn'?t|wouldn'?t|not sure we (?:can|should)) (?:rule|drop|cross|exclude)|not ruled out)/i;
+  const GIVE = /\b(?:fair (?:point|enough)|good point|you'?re right|i stand corrected|my mistake|i was wrong|i agree|(?:is|are) (?:ruled )?out\b|ruled out (?:then|after all))/i;
+  const aboutDisputed = (p, d, text) => optionMentions(p, text).some(o => o.q === d.q && o.k === d.option);
+  /** The teammate of dispute twist d argues that its option stays in. */
+  const disputeObjects = (p, d, text) => aboutDisputed(p, d, text) && OBJECT.test(text) && !GIVE.test(text);
+  /** … and gives way. */
+  const disputeYields = (p, d, text) => (aboutDisputed(p, d, text) || reportNums(text).includes(d.num)) && GIVE.test(text) && !OBJECT.test(text.replace(/\bstays? in\b/gi, ''));
+  /** A text passes on what rules the disputed option out: the decisive report, its details, or the case fact it clashes with. */
+  function disputeEvidence(p, d, text) {
+    const v = vocab(p), dec = p.clues.find(c => c.num === d.dnum);
+    const keys = new Set(tokens(dec.text).filter(t => v.specific.has(t) && !v.optionKeys.has(t)));
+    return reportNums(text).includes(d.dnum) || tokens(text).some(t => keys.has(t)) || factMentions(p, text).some(f => f.q === d.q && f.i === d.fact);
+  }
   const NUM = ['no', 'one', 'two', 'three', 'four', 'five', 'six'];
 
   /**
@@ -2203,13 +2380,10 @@ YOUR MANNER IN THIS PUZZLE
       const dropped = q.answer.filter(k => !(a[k] > 0));
       const pos = [0, 1, 2, 3, 4].filter(k => a[k] > 0 && !out.has(k));
       const uneven = pos.length >= 2 && Math.max(...pos.map(k => a[k])) - Math.min(...pos.map(k => a[k])) >= 10;
-      return { best, actual, hidden: 100 - Math.max(best, actual), use: Math.max(0, best - actual), kept, dropped, uneven };
+      // twist: the part of `use` lost by taking a teammate's wrong claim or objection on board (set below); it counts as leading
+      return { best, actual, hidden: 100 - Math.max(best, actual), use: Math.max(0, best - actual), twist: 0, kept, dropped, uneven, left: [0, 1, 2, 3, 4].filter(k => !out.has(k)) };
     });
-    const info = {
-      perQ: perQ.map(x => ({ best: x.best, actual: x.actual, hidden: x.hidden, use: x.use })),
-      best: S.mean(perQ.map(x => x.best)), actual: S.mean(perQ.map(x => x.actual)),
-      hidden: S.mean(perQ.map(x => x.hidden)), use: S.mean(perQ.map(x => x.use))
-    };
+    const scoreOf = (qi, left) => S.credenceScore(S.correctDist(left, 5), S.correctDist(p.questions[qi].answer, 5));
 
     /* observations: specific things the leader did, good and to try next time */
     const obs = [];
@@ -2294,65 +2468,129 @@ YOUR MANNER IN THIS PUZZLE
       });
       if (opts.timeLeft >= 60 && missed.length && !perQ.every(x => x.actual >= 99.5)) tip('early', 2, `You submitted with ${Math.floor(opts.timeLeft / 60)}:${String(Math.round(opts.timeLeft % 60)).padStart(2, '0')} left while ${missed.length === 1 ? 'a decisive report was' : missed.length + ' decisive reports were'} still hidden.`);
 
-      // the puzzle's twist: a teammate who holds back, or one who claims a clash that isn't there
+      // the puzzle's twist, drawn for this test: a teammate who holds back, needs reassurance, claims a clash that
+      // isn't there, misquotes a shared report, or argues for an option the reports rule out
       const dyn = p.dynamics || {};
+      const decisive = k => (k === 1 ? 'a decisive report' : NUM[k] + ' decisive reports');
       if (dyn.quiet) {
         const qf = dyn.quiet, nm = nameOf(qf), held = critical.filter(c => c.holder === qf), got = held.filter(c => surfaced.has(c.num));
         // held back: the leader wrote to everyone without naming this teammate at least once
         const heldBack = leaderMsgs.some(x => !x.direct && x.aud.includes(qf));
         metrics.quiet = { fid: qf, held: held.length, surfaced: got.length, asked: askedDirect.has(qf), heldBack };
         if (held.length && heldBack) {
-          metrics.challenge = { kind: 'quiet', fid: qf, met: got.length === held.length };
+          metrics.challenge = { kind: 'quiet', fid: qf, met: got.length === held.length, partly: false };
           if (got.length === held.length) good('quiet', 12, `${nm} held back when you wrote to everyone. You turned to ${nm} directly and drew out ${listText(got.map(c => '#' + c.num))}. Quiet teammates often hold what the team is missing.`);
-          else if (!askedDirect.has(qf)) tip('quiet', 7 + 2 * (held.length - got.length), `${nm} held back whenever you wrote to everyone and never passed on ${held.length - got.length === 1 ? 'a decisive report' : NUM[held.length - got.length] + ' decisive reports'}. When a teammate says little, ask them by name: quiet teammates often hold what the team is missing.`);
+          else if (!askedDirect.has(qf)) tip('quiet', 7 + 2 * (held.length - got.length), `${nm} held back whenever you wrote to everyone and never passed on ${decisive(held.length - got.length)}. When a teammate says little, ask them by name: quiet teammates often hold what the team is missing.`);
         }
       }
-      if (dyn.sure) {
-        const s = dyn.sure, nm = nameOf(s.fid), opt = optName(s.q, s.option);
+      if (dyn.anxious) {
+        const af = dyn.anxious, nm = nameOf(af), held = critical.filter(c => c.holder === af), got = held.filter(c => surfaced.has(c.num));
+        // it comes into play when the leader asks the teammate something before reassuring them
+        const calmAt = leaderMsgs.findIndex(x => x.aud.includes(af) && reassures(x.m.text));
+        const askAt = leaderMsgs.findIndex(x => x.aud.includes(af) && x.qs.length && !reassures(x.m.text));
+        const all = got.length === held.length;
+        metrics.anxious = { fid: af, held: held.length, surfaced: got.length, reassured: calmAt >= 0 };
+        if (held.length && askAt >= 0 && (calmAt < 0 || askAt < calmAt) && !(calmAt < 0 && all)) {
+          metrics.challenge = { kind: 'anxious', fid: af, met: calmAt >= 0 && all, partly: calmAt >= 0 && !all };
+          if (calmAt >= 0 && all) good('anxious', 12, `${nm} was worried about getting things wrong and held back. You reassured ${nm} (“${quote(leaderMsgs[calmAt].m.text, 70)}”) and drew out ${listText(got.map(c => '#' + c.num))}. A word of encouragement often unlocks what a hesitant teammate knows.`);
+          else if (calmAt < 0) tip('anxious', 7 + 2 * (held.length - got.length), `${nm} was worried about getting things wrong and never passed on ${decisive(held.length - got.length)}. Asking again doesn't help a worried teammate; saying that it's fine to be unsure, or that any information helps, does.`);
+        }
+      }
+      if (dyn.dispute) {
+        const d = dyn.dispute, nm = nameOf(d.fid), opt = optName(d.q, d.option);
+        const objAt = messages.findIndex(m => m.from === d.fid && disputeObjects(p, d, m.text));
+        if (objAt >= 0) {
+          // taken up: after the objection the leader writes to the teammate about it with a doubt or the evidence, or the teammate gives way
+          const gave = messages.some((m, i) => i > objAt && m.from === d.fid && disputeYields(p, d, m.text));
+          const addressed = gave || messages.some((m, i) => {
+            if (i <= objAt || m.from !== 'leader' || !audienceOf(m).includes(d.fid)) return false;
+            const ev = disputeEvidence(p, d, m.text);
+            return (aboutDisputed(p, d, m.text) || reportNums(m.text).includes(d.num) || ev) && (DOUBT.test(m.text) || ev);
+          });
+          const out = !(+answers[d.q][d.option] > 0), known = avail.has(d.dnum);
+          metrics.dispute = { fid: d.fid, made: true, addressed, out, known };
+          // only when the leader had the report that rules the option out; without it, keeping the option was reasonable
+          if (known) {
+            metrics.challenge = { kind: 'dispute', fid: d.fid, met: out && addressed, partly: out && !addressed };
+            const src = ref(d.dnum), Src = src[0].toUpperCase() + src.slice(1);
+            if (out && addressed) good('settled', 12, `${nm} argued that ${opt} should stay in, citing report #${d.num}. You took it up with ${nm} and ruled ${opt} out on the evidence: ${d.why}`);
+            else if (out) good('settled-part', 4, `${nm} argued that ${opt} should stay in, citing report #${d.num}. You ruled ${opt} out, which was right: ${d.why} The chat doesn't show you taking up the objection, though; settling a disagreement in the open keeps the team with you.`);
+            else {
+              const x = perQ[d.q], withIt = scoreOf(d.q, x.left.concat([d.option]));
+              x.twist = Math.max(0, Math.min(x.use, x.best - withIt));
+              tip('disputed', 9, `${nm} argued that ${opt} should stay in, citing report #${d.num}, and you kept it. ${Src} rules it out: ${d.why} Keeping it cost up to ${Math.round(100 - withIt)} points on Q${d.q + 1}. When teammates disagree, weigh each report against the case file rather than splitting the difference.`);
+            }
+          }
+        }
+      }
+      if (dyn.sure || dyn.misquote) {
+        const mis = !dyn.sure, s = dyn.sure || dyn.misquote, nm = nameOf(s.fid), opt = optName(s.q, s.option);
         // the teammate cites the misread report and says it rules the option out (a concession doesn't count)
         const CONCEDE = /\b(?:doesn'?t|does not|not|isn'?t|no longer)\s+(?:actually\s+)?(?:rule|clash)|stays in|after all/i;
         const aboutOpt = text => optionMentions(p, text).some(o => o.q === s.q && o.k === s.option);
-        const claimAt = messages.findIndex(m => m.from === s.fid && reportNums(m.text).includes(s.num) &&
-          /\brul(?:e|es|ed|ing)\s+(?:\w+\s+){0,2}out\b|\bexclud|\bdrop\b|\bcan'?t be\b/i.test(m.text) && !CONCEDE.test(m.text) && aboutOpt(m.text));
-        const claimed = claimAt >= 0;
+        const ruleOut = m => /\brul(?:e|es|ed|ing)\s+(?:\w+\s+){0,2}out\b|\bexclud|\bdrop\b|\bcan'?t be\b/i.test(m.text) && aboutOpt(m.text);
+        // a misquote misleads even when passed on as a plain report: it counts once its wrong wording comes up
+        // (a number, or two longer words, that the real report doesn't have)
+        const real = new Set(words(clueBy.get(s.num).text)), wrong = mis ? words(s.misquote).filter(w => !real.has(w) && (w.length >= 4 || /^\d+$/.test(w))) : [];
+        const quotes = m => mis && words(m.text).filter(w => wrong.includes(w)).some((w, k, xs) => /^\d+$/.test(w) || xs.length >= 2);
+        const claimAt = messages.findIndex(m => m.from === s.fid && reportNums(m.text).includes(s.num) && (ruleOut(m) || quotes(m)) && !CONCEDE.test(m.text) && !/\bmisread\b/i.test(m.text));
+        const claimed = claimAt >= 0, asClash = claimed && ruleOut(messages[claimAt]);
         // questioned: after the claim, the leader doubts it in a message that reaches the teammate and is about the claim
         // (its report, option or reasoning, or a direct reply to it), or the teammate takes it back. The answer alone is no evidence.
-        const claimToks = new Set(tokens(s.says + ' ' + clueBy.get(s.num).text));
+        // A misquote is also questioned by pointing to the report's real wording ("my copy reads…").
+        const claimToks = new Set(tokens((mis ? s.misquote : s.says) + ' ' + clueBy.get(s.num).text));
+        const doubts = t => DOUBT.test(t) || (mis && QUOTE_DOUBT.test(t));
         let lastFrom = -1;
         const questioned = claimed && messages.some((m, i) => {
           if (i <= claimAt) { if (m.from === s.fid) lastFrom = i; return false; }
-          if (m.from === s.fid) { const back = (reportNums(m.text).includes(s.num) || aboutOpt(m.text)) && CONCEDE.test(m.text); lastFrom = i; return back; }
+          if (m.from === s.fid) { const back = (reportNums(m.text).includes(s.num) || aboutOpt(m.text)) && (CONCEDE.test(m.text) || /\bmisread\b/i.test(m.text)); lastFrom = i; return back; }
           if (m.from !== 'leader') return false;
           const aud = audienceOf(m);
           if (!aud.includes(s.fid)) return false;
           const about = reportNums(m.text).includes(s.num) || aboutOpt(m.text) || tokens(m.text).some(t => claimToks.has(t)) ||
             (aud.length < FOL.length && lastFrom === claimAt);
-          return about && DOUBT.test(m.text);
+          return about && doubts(m.text);
         });
         const kept = +answers[s.q][s.option] > 0;
-        metrics.claim = { fid: s.fid, made: claimed, kept, questioned };
+        metrics.claim = { fid: s.fid, made: claimed, kept, questioned, misquote: mis };
         if (claimed) {
-          metrics.challenge = { kind: 'sure', fid: s.fid, met: kept && questioned, kept };
+          metrics.challenge = { kind: mis ? 'misquote' : 'sure', fid: s.fid, met: kept && questioned, partly: kept && !questioned, kept };
           const cost = Math.round(100 - S.credenceScore(S.correctDist(p.questions[s.q].answer.filter(k => k !== s.option), 5), S.correctDist(p.questions[s.q].answer, 5)));
-          if (kept && questioned) good('checked', 12, `${nm} said report #${s.num} rules out ${opt}. You questioned the claim instead of taking it on trust and kept ${opt}, which was right: ${s.why}`);
-          else if (kept) good('kept-claim', 4, `${nm} said report #${s.num} rules out ${opt}. You kept ${opt} among the possibilities, which was right: ${s.why} The chat doesn't show you questioning the claim, though; asking ${nm} which case fact it clashes with makes sure.`);
-          else tip('swayed', 9, `${nm} said report #${s.num} rules out ${opt}, and ${questioned ? 'although you questioned it, ' : ''}you ruled it out. It doesn't: ${s.why} ${opt} was one of the right answers on Q${s.q + 1}, so ${questioned ? 'dropping it' : 'taking the claim on trust'} cost up to ${cost} points. When a teammate says a report rules an option out, check it against the case file yourself.`);
+          if (!kept) { const x = perQ[s.q]; x.twist = Math.max(0, Math.min(x.use, x.best - scoreOf(s.q, x.left.filter(k => k !== s.option)))); }
+          const said = mis ? `${nm} quoted shared report #${s.num} as “${quote(s.misquote)}”` + (asClash ? ` and said it rules out ${opt}` : `, which would rule out ${opt}`) : `${nm} said report #${s.num} rules out ${opt}`;
+          if (mis) {
+            if (kept && questioned) good('quote-checked', 12, `${said}. You checked the quote instead of taking it on trust and kept ${opt}, which was right: ${s.why}`);
+            else if (kept) good('quote-kept', 4, `${said}. You kept ${opt} among the possibilities, which was right: ${s.why} The chat doesn't show you correcting the quote, though; you have the same report, so pointing to its real wording sets the team straight.`);
+            else tip('misquoted', 9, `${said}, and ${questioned ? 'although you questioned it, ' : ''}you ruled it out. It doesn't: ${s.why} ${opt} was one of the right answers on Q${s.q + 1}, so ${questioned ? 'dropping it' : 'taking the quote on trust'} cost up to ${cost} points. When a teammate quotes a report you can see, check it against your own copy.`);
+          } else if (kept && questioned) good('checked', 12, `${said}. You questioned the claim instead of taking it on trust and kept ${opt}, which was right: ${s.why}`);
+          else if (kept) good('kept-claim', 4, `${said}. You kept ${opt} among the possibilities, which was right: ${s.why} The chat doesn't show you questioning the claim, though; asking ${nm} which case fact it clashes with makes sure.`);
+          else tip('swayed', 9, `${said}, and ${questioned ? 'although you questioned it, ' : ''}you ruled it out. It doesn't: ${s.why} ${opt} was one of the right answers on Q${s.q + 1}, so ${questioned ? 'dropping it' : 'taking the claim on trust'} cost up to ${cost} points. When a teammate says a report rules an option out, check it against the case file yourself.`);
         }
       }
     }
     // using the reports: the same checks for solo and team puzzles
+    const dsp = p.dynamics && p.dynamics.dispute, disputed = (qi, k) => !!(metrics.challenge && metrics.challenge.kind === 'dispute' && dsp.q === qi && dsp.option === k);
     perQ.forEach((x, qi) => {
-      x.kept.slice(0, 1).forEach(kp => {
+      x.kept.filter(kp => !disputed(qi, kp.k)).slice(0, 1).forEach(kp => {
         const refs = listText(kp.refs.map(n => (p.solo ? '#' + n : ref(n)))) + (kp.refs.length > 1 ? ' together' : '');
         tip('kept', 2 + kp.pct / 6, (p.solo ? `The reports rule out ${optName(qi, kp.k)} (${refs})` : `You had what you needed to rule out ${optName(qi, kp.k)} (${refs})`) + `, but you still gave it ${kp.pct}%.`);
       });
-      x.dropped.filter(k => !(metrics.claim && metrics.claim.made && p.dynamics.sure.q === qi && p.dynamics.sure.option === k)).slice(0, 1).forEach(k => tip('dropped', 4, `You ruled out ${optName(qi, k)}, but no report rules it out: it was one of the right answers on Q${qi + 1}.`));
+      const cl = p.dynamics && (p.dynamics.sure || p.dynamics.misquote);
+      x.dropped.filter(k => !(metrics.claim && metrics.claim.made && cl.q === qi && cl.option === k)).slice(0, 1).forEach(k => tip('dropped', 4, `You ruled out ${optName(qi, k)}, but no report rules it out: it was one of the right answers on Q${qi + 1}.`));
       if (x.uneven && !x.kept.length && !x.dropped.length) tip('uneven', 2, `On Q${qi + 1} you gave unequal shares to options that no report ${p.solo ? '' : 'you saw '}separated. When the reports can't tell options apart, equal shares score best.`);
     });
     const perfect = perQ.every(x => x.actual >= 99.5);
     if (perfect) good('perfect', 5, p.solo ? 'You read every report correctly.' : 'You got the exact answer on both questions.');
     else if (!p.solo && perQ.every(x => x.use < 1 && x.actual <= x.best + 1)) good('used-well', 3, 'You used the reports you gathered well: your answer was the best one possible with them.');
 
+    // the leading score leaves out reasoning: 100 minus the points lost to reports that stayed hidden and to a
+    // teammate's wrong claim or objection taken on board
+    const info = {
+      perQ: perQ.map(x => ({ best: x.best, actual: x.actual, hidden: x.hidden, use: x.use, twist: x.twist })),
+      best: S.mean(perQ.map(x => x.best)), actual: S.mean(perQ.map(x => x.actual)),
+      hidden: S.mean(perQ.map(x => x.hidden)), use: S.mean(perQ.map(x => x.use)), twist: S.mean(perQ.map(x => x.twist)),
+      lead: S.mean(perQ.map(x => 100 - x.hidden - x.twist))
+    };
     return { metrics, info, observations: obs };
   }
   function jaccard(a, b) {
@@ -2381,6 +2619,8 @@ YOUR MANNER IN THIS PUZZLE
       surfaced: sum('surfaced'), critical: sum('critical'), repeatsTotal: sum('repeats'), connectsTotal: sum('connects'),
       targetedShare: sum('targeted') + sum('generic') ? sum('targeted') / (sum('targeted') + sum('generic')) : NaN,
       hidden: allQ.length ? S.mean(allQ.map(x => x.hidden)) : NaN, use: allQ.length ? S.mean(allQ.map(x => x.use)) : NaN,
+      // (results saved before the leading score existed have no twist part)
+      twist: allQ.length ? S.mean(allQ.map(x => x.twist || 0)) : NaN, lead: allQ.length ? S.mean(allQ.map(x => 100 - x.hidden - (x.twist || 0))) : NaN,
       allAsked: team.filter(r => r.analysis.metrics.askedDirect.length === FOL.length).length,
       allSurfaced: team.filter(r => r.analysis.metrics.critical && r.analysis.metrics.surfaced === r.analysis.metrics.critical).length,
       quickPuzzles: team.filter(r => quickDone(r.analysis.metrics)).length, puzzles: n,
@@ -2415,12 +2655,18 @@ YOUR MANNER IN THIS PUZZLE
       if (o.key === 'quiet' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate held back when you wrote to everyone, and each time you turned to them directly and drew out what they held.`; o.puzzle = null; }
       if (o.key === 'checked' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate claimed a report rules out an option that it doesn't, and each time you questioned the claim instead of taking it on trust.`; o.puzzle = null; }
       if (o.key === 'kept-claim' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate claimed a report rules out an option that it doesn't, and each time you kept that option among the possibilities. The chat doesn't show you questioning the claims, though.`; o.puzzle = null; }
+      if (o.key === 'anxious' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate was too worried to share until you reassured them, and each time you did and drew out what they held.`; o.puzzle = null; }
+      if (o.key === 'quote-checked' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate misquoted a shared report, and each time you checked the quote instead of taking it on trust.`; o.puzzle = null; }
+      if (o.key === 'settled' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate argued for an option the reports rule out, and each time you took it up and settled it on the evidence.`; o.puzzle = null; }
       if (o.key === 'context' && totals.contextPuzzles > 1) { o.text = `You told your teammates what the case file says in ${totals.contextPuzzles === n ? (n === 2 ? 'both' : 'all ' + n) : totals.contextPuzzles + ' of ' + n} team puzzles, so they could judge which of their reports rule an option out.`; o.weight += totals.contextPuzzles; o.puzzle = null; }
     });
     tips.forEach(o => {
       if (o.key === 'no-context' && o.count > 1) { o.text = `In ${o.count} team puzzles you didn't tell your teammates what the case file says. Only you had it, so they couldn't tell which of their reports rule an option out. Passing on the case facts lets them pick out the decisive ones.`; o.puzzle = null; }
       if (o.key === 'swayed' && o.count > 1) { o.text = `In ${o.count} team puzzles you ruled out an option because a teammate said a report rules it out, and it didn't. When a teammate claims a clash, check the report against the case file yourself.`; o.puzzle = null; }
       if (o.key === 'quiet' && o.count > 1) { o.text = `In ${o.count} team puzzles a quiet teammate held back when you wrote to everyone, and their decisive reports stayed hidden. When a teammate says little, ask them by name.`; o.puzzle = null; }
+      if (o.key === 'anxious' && o.count > 1) { o.text = `In ${o.count} team puzzles a worried teammate never got the reassurance they needed, and their decisive reports stayed hidden. Telling a hesitant teammate that it's fine to be unsure helps more than asking again.`; o.puzzle = null; }
+      if (o.key === 'misquoted' && o.count > 1) { o.text = `In ${o.count} team puzzles you ruled out an option because a teammate misquoted a shared report. When a teammate quotes a report you can see, check it against your own copy.`; o.puzzle = null; }
+      if (o.key === 'disputed' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate talked you into keeping an option the reports rule out. When teammates disagree, weigh each report against the case file.`; o.puzzle = null; }
       if (o.key === 'repeats' && o.count > 1) { o.text = `Across the test, ${totals.repeatsTotal} of your questions repeated an earlier one, such as “${o.example}”. ${REPEAT_ADVICE}`; o.puzzle = null; }
     });
     const pick = (xs, k) => xs.sort((a, b) => b.weight - a.weight).slice(0, k);
@@ -2449,23 +2695,29 @@ YOUR MANNER IN THIS PUZZLE
       { label: 'Drawing out hidden clues', value: `${T.surfaced} of ${T.critical} decisive clues`, rating: rate(T.critical ? T.surfaced / T.critical : NaN, 0.75, 0.4), note: 'Weak leaders learned little from their team: their answers looked like uninformed guesses.' }
     ];
   }
+  // how the leader dealt with each kind of twist, for the style's last sentence
+  const TWIST_WORDS = {
+    quiet: { done: 'drew out the quiet one', miss: 'a quiet teammate kept what they knew', tip: 'Ask the quiet ones by name.' },
+    anxious: { done: 'reassured the worried one', miss: 'a worried teammate never got the reassurance they needed to share', part: 'you reassured a worried teammate, but some of what they knew stayed hidden', tip: 'Tell a hesitant teammate that it\'s fine to be unsure.' },
+    sure: { done: 'questioned the overconfident one', miss: 'you took a teammate\'s wrong claim on trust', part: 'you kept the option a teammate wrongly ruled out, but didn\'t question the claim: ask which case fact it clashes with', tip: 'Check claims against the case file.' },
+    misquote: { done: 'checked a misquoted report against your own copy', miss: 'you took a misquoted report on trust', part: 'you kept the option a misquoted report seemed to rule out, but didn\'t correct the quote', tip: 'Check a quoted report against your own copy.' },
+    dispute: { done: 'settled a disagreement on the evidence', miss: 'a teammate talked you into keeping an option the reports rule out', part: 'you ruled out the option a teammate argued for, but didn\'t take up the objection', tip: 'When teammates disagree, weigh each report against the case file.' }
+  };
+  const COUNT = ['', 'One thing', 'Two things', 'Three things', 'Four things', 'Five things', 'Six things'];
   /** A playful leadership style from the habits: { name, text }. Every claim in the text rests on behaviour seen in the chat.
-   * The puzzles' twists add a sentence: how the leader dealt with a quiet teammate or a wrong claim. */
+   * The twists the leader met add a sentence: what they handled, half handled or missed. */
   function leaderStyle(hb, T) {
     const st = baseStyle(hb, T), ch = T.challenges || [];
-    const missedQuiet = ch.some(c => c.kind === 'quiet' && !c.met), swayed = ch.some(c => c.kind === 'sure' && !c.met && !c.kept);
-    const unchecked = ch.some(c => c.kind === 'sure' && !c.met && c.kept);
-    const handled = ch.length && ch.every(c => c.met);
+    // results saved before `partly` existed marked a half-handled claim with `kept`
+    const state = c => (c.met ? 'done' : c.partly || (c.kind === 'sure' && c.kept) ? 'part' : 'miss');
+    const words = s => [...new Set(ch.filter(c => TWIST_WORDS[c.kind] && state(c) === s).map(c => TWIST_WORDS[c.kind][s]))];
+    const done = words('done'), part = words('part'), miss = words('miss');
     let add = '';
-    if (swayed && missedQuiet) add = 'Two things to watch: a quiet teammate kept what they knew, and you took a teammate\'s wrong claim on trust.';
-    else if (swayed) add = 'One thing to watch: you took a teammate\'s wrong claim on trust. Check claims against the case file.';
-    else if (missedQuiet) add = 'One thing to watch: a quiet teammate kept what they knew. Ask the quiet ones by name.';
-    else if (unchecked) add = (ch.some(c => c.kind === 'quiet') ? 'You drew out the quiet teammate. ' : '') + 'You kept the option a teammate wrongly ruled out, but didn\'t question the claim: ask which case fact it clashes with.';
-    else if (handled) {
-      const kinds = new Set(ch.map(c => c.kind));
-      add = kinds.size > 1 ? 'You also handled the teammates who made it harder: you drew out the quiet one and questioned the overconfident one.'
-        : kinds.has('quiet') ? 'You also noticed the teammate who held back and drew them out.' : 'You also questioned the teammate who claimed too much instead of taking it on trust.';
-    }
+    if (miss.length) {
+      add = `${COUNT[miss.length] || miss.length + ' things'} to watch: ${listText(miss)}.`;
+      if (miss.length === 1) add += ' ' + TWIST_WORDS[ch.find(c => state(c) === 'miss' && TWIST_WORDS[c.kind]).kind].tip;
+    } else if (part.length) add = (done.length ? `You ${listText(done)}. ` : '') + part.map(t => t[0].toUpperCase() + t.slice(1) + '.').join(' ');
+    else if (done.length) add = done.length > 1 ? `You also handled the teammates who made it harder: you ${listText(done)}.` : `You also handled the teammate who made it harder: you ${done[0]}.`;
     return add ? { name: st.name, text: st.text + ' ' + add } : st;
   }
   function baseStyle(hb, T) {
@@ -2494,7 +2746,8 @@ YOUR MANNER IN THIS PUZZLE
     return { name: 'The Coordinator', text: 'You kept the team moving and got part of the picture. A few more follow-up questions, or telling the team what the case file says, would surface the rest.' };
   }
 
-  root.MEL_COACH = { tokens, words, vocab, optionMentions, reportNums, questionMention, factMentions, sentences, isQuestion, vocatives, audienceOf, ruledOut, bestWith, analyse, top, summarise, habits, leaderStyle };
+  root.MEL_COACH = { tokens, words, vocab, optionMentions, reportNums, questionMention, factMentions, sentences, isQuestion, vocatives, audienceOf, ruledOut, bestWith, analyse, top, summarise, habits, leaderStyle,
+    DOUBT, QUOTE_DOUBT, OUTISH, reassures, disputeObjects, disputeYields, disputeEvidence };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.MEL_COACH;
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -2505,8 +2758,9 @@ YOUR MANNER IN THIS PUZZLE
  * for a view) and pass on their reports a couple at a time, as the LLM teammates are briefed to
  * (followerBrief). Like them, they can't tell which of their reports rule an option out until the
  * leader tells them the case facts. Each has a slightly different voice. A puzzle's twist (puzzles.js,
- * dynamics) makes one of them hold back in replies to everyone, or claim one clash that isn't there.
- * Deterministic, so the Node tests can check them. */
+ * dynamics, drawn for each test) makes one of them hold back in replies to everyone, share only once
+ * reassured, claim one clash that isn't there, misquote a shared report, or argue that an option the
+ * reports rule out should stay in. Deterministic, so the Node tests can check them. */
 (function (root) {
   'use strict';
   const PZ = root.MEL_PUZZLES || require('./puzzles.js');
@@ -2523,7 +2777,10 @@ YOUR MANNER IN THIS PUZZLE
       clash: 'Then #{n} rules out {o}: {t}', noClash: 'None of my reports clashes with that.',
       needCase: 'I can\'t tell which of mine rule anything out without the case details. What does the case file say?',
       shy: ['I will let the others go first.', 'Not sure mine are useful. The others seem to have it covered.'],
-      sure: 'Easy one: #{n} rules out {o}. {t}.', concede: 'Fair point. #{n} does not actually clash with the case file, so {o} stays in.'
+      sure: 'Easy one: #{n} rules out {o}, since {t}.', concede: 'Fair point. #{n} does not actually clash with the case file, so {o} stays in.',
+      worry: ['I have a few, but I\'m worried I\'ll get them wrong and send us the wrong way.', 'Sorry, I\'m really not sure my reports are right. I don\'t want to mislead anyone.'],
+      calm: 'OK, thanks. That helps.', requote: 'You\'re right, I misread #{n}. It says: {t} So {o} stays in.',
+      defend: 'Wait, I would keep {o} in. #{n}: {t} So {s}.', yield: 'Fair point. #{n} does not settle it, so {o} is out.'
     },
     f2: { // Theo: chatty
       share: ['Good question. Report #{n} says: {t}', 'Oh, I have one on that. #{n}: {t}', 'Yes! #{n}: {t}'],
@@ -2535,7 +2792,10 @@ YOUR MANNER IN THIS PUZZLE
       clash: 'Oh, that matters! Report #{n} rules out {o}: {t}', noClash: 'Hmm, none of mine clash with that.',
       needCase: 'Honestly, I can\'t tell which ones matter without knowing more about the case. What do we know?',
       shy: ['Oh, I\'ll let the others go first.', 'Hmm, I\'m not sure mine matter much. The others probably know better.'],
-      sure: 'Oh, that settles one! #{n} rules out {o}, no doubt about it: {t}.', concede: 'Ah, you\'re right, I jumped the gun. #{n} doesn\'t clash with anything, so {o} stays in.'
+      sure: 'Oh, that settles one! #{n} rules out {o}, no doubt about it: {t}.', concede: 'Ah, you\'re right, I jumped the gun. #{n} doesn\'t clash with anything, so {o} stays in.',
+      worry: ['Oh, I have some, but what if I get them wrong? I don\'t want to throw the team off.', 'Hmm, I\'m honestly nervous my reports are off. I\'d hate to mislead you.'],
+      calm: 'Phew, thanks! OK then.', requote: 'Oops, my bad, I misread #{n}! It actually says: {t} So {o} stays in.',
+      defend: 'Hold on, I wouldn\'t drop {o}! #{n} says: {t} So {s}.', yield: 'Ah, fair point, I see it now. #{n} doesn\'t save it: {o} is out.'
     },
     f3: { // Jonas: careful
       share: ['I think #{n} is relevant: {t}', 'Report #{n}: {t}', 'Let me check... #{n}: {t}'],
@@ -2547,7 +2807,10 @@ YOUR MANNER IN THIS PUZZLE
       clash: 'Given that, I think #{n} rules out {o}: {t}', noClash: 'I don\'t think any of my reports clashes with that.',
       needCase: 'I\'m not sure. Whether a report rules something out depends on the case, and I haven\'t seen the case file.',
       shy: ['I\'ll let the others go first, if that\'s OK.', 'I\'m not sure mine are useful. I\'ll leave it to the others.'],
-      sure: 'Then #{n} definitely rules out {o}: {t}.', concede: 'You\'re right, I misread it. #{n} doesn\'t rule out {o} after all.'
+      sure: 'Then #{n} definitely rules out {o}: {t}.', concede: 'You\'re right, I misread it. #{n} doesn\'t rule out {o} after all.',
+      worry: ['I do have some, but I\'m worried I\'ve read them wrong. I\'d rather not mislead the team.', 'I\'m sorry, I\'m not confident about mine. What if I\'m wrong?'],
+      calm: 'Thank you, that helps.', requote: 'You\'re right, I misread #{n}. It says: {t} So {o} stays in, after all.',
+      defend: 'I\'m not sure we can drop {o}. #{n}: {t} So {s}.', yield: 'You\'re right, I see it now. #{n} doesn\'t change that, so {o} is out.'
     }
   };
   const OPINION = /\b(what do you think|what'?s your (view|take|guess|opinion)|your (view|opinion|take|guess)|do you agree|which (one|option)s? (is|are|would|do|should)|should we|any (ideas|thoughts|hunches)|thoughts\b|best guess)/i;
@@ -2555,8 +2818,8 @@ YOUR MANNER IN THIS PUZZLE
   const ALL = /\b(all|every|everything|anything|what (do|did) you (have|know|got|see)|what have you got|your (reports?|clues?|info|information|notes)|share|send|list|tell (me|us))\b/i;
   const RULE = /\b(rul\w*\s+(?:\w+\s+)?out|exclud\w*|eliminat\w*|decisive|clash\w*)\b/i;
   const GREET =/^\s*(hi|hello|hey|hiya|good (morning|afternoon|evening))\b/i;
-  const DOUBT = /\b(sure|really|why|how so|certain|doesn'?t|does not|don'?t|not|isn'?t|is not|wrong|mistake|check|explain|enough|minimum|maximum|at least|so what)\b/i;
   const THANKS = /^\s*(thanks|thank you|thx|great|perfect|ok|okay|got it|cool|nice|good|noted|understood|brilliant|super)\b/i;
+  const FIXED = /stays in|after all|not actually|doesn'?t (clash|rule)|misread/i;   // a teammate taking back a claimed clash
   const pick = (x, n) => (Array.isArray(x) ? x[n % x.length] : x);
   const fill = (tpl, cl) => tpl.replace('{n}', cl.num).replace('{t}', cl.text);
 
@@ -2569,20 +2832,38 @@ YOUR MANNER IN THIS PUZZLE
     let lastOwn = -1;
     messages.forEach((m, i) => { if (m.from === fid) lastOwn = i; });
     const said = messages.filter(m => m.from === fid).length;
-    const incoming = messages.slice(lastOwn + 1).filter(m => m.from === 'leader' && (m.to === 'all' || m.to === fid));
+    const reaches = m => m.from === 'leader' && (m.to === 'all' || m.to === fid);
+    const incoming = messages.slice(lastOwn + 1).filter(reaches);
     if (!incoming.length) return '';
     const latest = incoming[incoming.length - 1], direct = incoming.some(m => m.to === fid);
     // addressed to someone else by name ("Theo, …"); merely mentioning Theo is still for everyone
     if (!direct && !C.audienceOf(latest).includes(fid)) return '';
     const text = incoming.map(m => m.text).join('\n');
     const dyn = p.dynamics || {}, own = messages.filter(m => m.from === fid).map(m => m.text);
+    const named = direct || incoming.some(m => C.sentences(m.text).some(x => C.vocatives(x).has(fid)));
     // a quiet teammate holds back unless messaged directly or addressed by name: a hesitant line or two, then silence
     const quiet = dyn.quiet === fid;
-    if (quiet && !direct && !incoming.some(m => C.sentences(m.text).some(x => C.vocatives(x).has(fid)))) {
+    if (quiet && !named) {
       const hedges = own.filter(t => V.shy.includes(t)).length;
       return hedges < V.shy.length ? V.shy[hedges] : '';
     }
-    const mine = PZ.cluesFor(p, fid);   // by report number: a teammate doesn't know which of its reports the others also have
+    // a worried teammate shares nothing until the leader reassures them: a worried line to every direct message,
+    // one or two to messages for everyone, then silence
+    let calmed = false;
+    if (dyn.anxious === fid && !messages.slice(0, lastOwn + 1).some(m => reaches(m) && C.reassures(m.text))) {
+      if (!incoming.some(m => C.reassures(m.text))) {
+        const worries = own.filter(t => V.worry.includes(t)).length;
+        if (named) return V.worry[worries % V.worry.length];
+        return worries < V.worry.length ? V.worry[worries] : '';
+      }
+      calmed = true;
+    }
+    // a teammate who misquotes a shared report has the wrong wording in its own copy, and reads it as a clash,
+    // until the leader corrects it
+    const mq = dyn.misquote && dyn.misquote.fid === fid ? dyn.misquote : null;
+    const mqFixed = mq && own.some(t => C.reportNums(t).includes(mq.num) && FIXED.test(t));
+    let mine = PZ.cluesFor(p, fid);   // by report number: a teammate doesn't know which of its reports the others also have
+    if (mq && !mqFixed) mine = mine.map(cl => (cl.num === mq.num ? Object.assign({}, cl, { text: mq.misquote, kind: 'out', rules: [mq.option], fact: mq.fact }) : cl));
     const v = C.vocab(p);
     const topics = new Set(C.tokens(text).filter(t => v.specific.has(t)));
     const opts = C.optionMentions(p, text), nums = C.reportNums(text);
@@ -2602,11 +2883,18 @@ YOUR MANNER IN THIS PUZZLE
 
     // case facts the leader has told this teammate, and which of its reports clash with them
     const factKey = f => f.q + ':' + f.i;
-    const before = new Set(messages.slice(0, lastOwn + 1).filter(m => m.from === 'leader' && (m.to === 'all' || m.to === fid))
-      .flatMap(m => C.factMentions(p, m.text)).map(factKey));
+    const before = new Set(messages.slice(0, lastOwn + 1).filter(reaches).flatMap(m => C.factMentions(p, m.text)).map(factKey));
     const newFacts = C.factMentions(p, text).filter(f => !before.has(factKey(f)));
     const known = new Set([...before, ...newFacts.map(factKey)]);
     const clashes = mine.filter(cl => cl.kind === 'out' && known.has(cl.q + ':' + cl.fact));
+    // the misquoted report, questioned: the teammate rereads it
+    if (mq && !mqFixed) {
+      const made = own.some(t => C.reportNums(t).includes(mq.num) && (/\brules? out\b/i.test(t) || t.includes(mq.misquote)));
+      const claimToks = new Set(C.tokens(mq.misquote + ' ' + p.clues.find(c => c.num === mq.num).text));
+      const about = nums.includes(mq.num) || opts.some(o => o.q === mq.q && o.k === mq.option) || C.tokens(text).some(t => claimToks.has(t));
+      if (made && about && (C.DOUBT.test(text) || C.QUOTE_DOUBT.test(text)))
+        return V.requote.replace('{n}', mq.num).replace('{t}', p.clues.find(c => c.num === mq.num).text).replace('{o}', p.questions[mq.q].options[mq.option]);
+    }
     // an overconfident teammate also claims a clash that isn't there, once it knows the case fact it misreads,
     // and drops the claim when the leader questions it
     const sure = dyn.sure && dyn.sure.fid === fid ? dyn.sure : null;
@@ -2619,7 +2907,7 @@ YOUR MANNER IN THIS PUZZLE
         // questioned: the claim's report, option or reasoning comes up with a doubt, or a doubt answers the claim straight away
         const claimToks = new Set(C.tokens(sure.says + ' ' + p.clues.find(c => c.num === sure.num).text));
         const about = nums.includes(sure.num) || opts.some(o => o.q === sure.q && o.k === sure.option) || C.tokens(text).some(t => claimToks.has(t)) || said(own[own.length - 1] || '');
-        const challenged = made && about && DOUBT.test(text);
+        const challenged = made && about && C.DOUBT.test(text);
         if (challenged) return V.concede.replace('{n}', sure.num).replace('{o}', opt);
         claim = { num: sure.num, q: sure.q, rules: [sure.option], claim: true, made, text: sure.says, opt };
       }
@@ -2634,61 +2922,85 @@ YOUR MANNER IN THIS PUZZLE
         : k ? `Also #${cl.num} rules out ${optName(cl)}: ${cl.text}` : V.clash.replace('{n}', cl.num).replace('{o}', optName(cl)).replace('{t}', cl.text)).join(' ') +
         (fresh.length > 2 ? ' ' + V.more : '');
     };
-    // 0. new case facts: check the reports against them. Asked which reports rule something out:
-    // without case facts there is no way to tell.
-    if (newFacts.length) return tellClashes();
-    if (RULE.test(text)) return known.size ? tellClashes() : V.needCase;
-    // drawn out at last, a quiet teammate checks its reports against the case facts it heard earlier
-    if (quiet && known.size && clashes.some(cl => !shared.has(cl.num)) && !nums.length && !opts.length) return tellClashes();
+    // a teammate who disputes a rule-out argues that the option stays in once the leader passes on case facts
+    // about its question, treats the option as ruled out, or passes on what rules it out; questioned, or shown
+    // the evidence, they give way
+    const dp = dyn.dispute && dyn.dispute.fid === fid ? dyn.dispute : null;
+    if (dp && !own.some(t => C.disputeYields(p, dp, t))) {
+      const opt = p.questions[dp.q].options[dp.option], onOpt = opts.some(o => o.q === dp.q && o.k === dp.option);
+      const evidence = C.disputeEvidence(p, dp, text), made = own.some(t => C.disputeObjects(p, dp, t));
+      if (made && (onOpt || nums.includes(dp.num) || evidence) && (C.DOUBT.test(text) || evidence)) return V.yield.replace('{n}', dp.num).replace('{o}', opt);
+      const defend = () => V.defend.replace('{o}', opt).replace('{n}', dp.num).replace('{t}', p.clues.find(c => c.num === dp.num).text).replace('{s}', dp.says);
+      if (!made && onOpt && (C.OUTISH.test(text) || evidence)) return defend();
+      if (!made && newFacts.some(f => f.q === dp.q)) { const cl = tellClashes(); return (cl === V.noClash ? '' : cl + ' ') + defend(); }
+    }
 
-    // 1. report numbers
-    if (nums.length) {
-      const held = mine.filter(cl => nums.includes(cl.num));
-      if (held.length) return share(held.slice(0, 2), held.every(cl => shared.has(cl.num)));
-      if (!topics.size && !opts.length) return direct ? `I don't have #${nums[0]}.` : '';
-    }
-    // 2. a topic: options or specific terms from the reports. When an option is named, one shared
-    // word is not enough ("operator error" should not bring up "zero errors" on the vision sensor).
-    const onTopic = (tp, op) => mine.map(cl => {
-      let sc = new Set(C.tokens(cl.text).filter(t => tp.has(t))).size;
-      if (cl.rules && op.some(o => o.q === cl.q && cl.rules.includes(o.k))) sc += 2;
-      if (qMention != null && cl.q === qMention) sc += 0.5;
-      return { cl, sc };
-    }).filter(x => x.sc >= (op.length ? 2 : 1)).sort((a, b) => b.sc - a.sc || (a.cl.holder === 'public') - (b.cl.holder === 'public'));
-    if (topics.size || opts.length) {
-      const scored = onTopic(topics, opts);
-      const fresh = scored.filter(x => !shared.has(x.cl.num)).map(x => x.cl);
-      if (fresh.length) return share(fresh.slice(0, 2)) + (fresh.length > 2 ? ' ' + V.more : '');
-      if (scored.length) return MORE.test(latest.text) ? V.doneTopic : share([scored[0].cl], true);
-      if (asked) return pick(V.none, said);
-      return direct ? pick(V.ok, said) : '';
-    }
-    // 3. a view on the answer
-    if (OPINION.test(text)) {
-      const outs = (claim ? [claim] : []).concat(clashes).filter(cl => qMention == null || cl.q === qMention);
-      if (!outs.length) return known.size ? V.noView : V.needCase;
-      if (!outs[0].claim) shared.add(outs[0].num);
-      return V.view.replace('{n}', outs[0].num).replace('{o}', outs[0].claim ? outs[0].opt : optName(outs[0]));
-    }
-    // 4. greetings and thanks
-    if (!asked && GREET.test(text)) return V.hi;
-    if (!asked && THANKS.test(latest.text) && !MORE.test(latest.text)) return direct ? pick(V.ok, said) : '';
-    // 5. "anything else?" carries on with the topic of the previous request
-    if (MORE.test(text)) {
-      const prev = messages.slice(0, lastOwn + 1).filter(m => m.from === 'leader' && (m.to === 'all' || m.to === fid)).pop();
-      if (prev) {
-        const fresh = onTopic(new Set(C.tokens(prev.text).filter(t => v.specific.has(t))), C.optionMentions(p, prev.text)).filter(x => !shared.has(x.cl.num)).map(x => x.cl);
-        if (fresh.length) return share(fresh.slice(0, 2)) + (fresh.length > 2 ? ' ' + V.more : '');
+    const respond = () => {
+      // 0. new case facts: check the reports against them. Asked which reports rule something out:
+      // without case facts there is no way to tell.
+      if (newFacts.length) return tellClashes();
+      if (RULE.test(text)) return known.size ? tellClashes() : V.needCase;
+      // drawn out at last, a quiet or worried teammate checks its reports against the case facts it heard earlier
+      if ((quiet || calmed) && known.size && clashes.some(cl => !shared.has(cl.num)) && !nums.length && !opts.length) return tellClashes();
+
+      // 1. report numbers
+      if (nums.length) {
+        const held = mine.filter(cl => nums.includes(cl.num));
+        if (held.length) return share(held.slice(0, 2), held.every(cl => shared.has(cl.num)));
+        if (!topics.size && !opts.length) return direct ? `I don't have #${nums[0]}.` : '';
       }
+      // 2. a topic: options or specific terms from the reports. When an option is named, one shared
+      // word is not enough ("operator error" should not bring up "zero errors" on the vision sensor).
+      const onTopic = (tp, op) => mine.map(cl => {
+        let sc = new Set(C.tokens(cl.text).filter(t => tp.has(t))).size;
+        if (cl.rules && op.some(o => o.q === cl.q && cl.rules.includes(o.k))) sc += 2;
+        if (qMention != null && cl.q === qMention) sc += 0.5;
+        return { cl, sc };
+      }).filter(x => x.sc >= (op.length ? 2 : 1)).sort((a, b) => b.sc - a.sc || (a.cl.holder === 'public') - (b.cl.holder === 'public'));
+      if (topics.size || opts.length) {
+        const scored = onTopic(topics, opts);
+        const fresh = scored.filter(x => !shared.has(x.cl.num)).map(x => x.cl);
+        if (fresh.length) return share(fresh.slice(0, 2)) + (fresh.length > 2 ? ' ' + V.more : '');
+        if (scored.length) return MORE.test(latest.text) ? V.doneTopic : share([scored[0].cl], true);
+        if (asked) return pick(V.none, said);
+        return direct ? pick(V.ok, said) : '';
+      }
+      // 3. a view on the answer
+      if (OPINION.test(text)) {
+        const outs = (claim ? [claim] : []).concat(clashes).filter(cl => qMention == null || cl.q === qMention);
+        if (!outs.length) return known.size ? V.noView : V.needCase;
+        if (!outs[0].claim) shared.add(outs[0].num);
+        return V.view.replace('{n}', outs[0].num).replace('{o}', outs[0].claim ? outs[0].opt : optName(outs[0]));
+      }
+      // 4. greetings and thanks
+      if (!asked && GREET.test(text)) return V.hi;
+      if (!asked && THANKS.test(latest.text) && !MORE.test(latest.text)) return direct ? pick(V.ok, said) : '';
+      // 5. "anything else?" carries on with the topic of the previous request
+      if (MORE.test(text)) {
+        const prev = messages.slice(0, lastOwn + 1).filter(reaches).pop();
+        if (prev) {
+          const fresh = onTopic(new Set(C.tokens(prev.text).filter(t => v.specific.has(t))), C.optionMentions(p, prev.text)).filter(x => !shared.has(x.cl.num)).map(x => x.cl);
+          if (fresh.length) return share(fresh.slice(0, 2)) + (fresh.length > 2 ? ' ' + V.more : '');
+        }
+      }
+      // 6. a general request for reports, or for more
+      if (asked || MORE.test(text) || ALL.test(text) || qMention != null) {
+        const pool = freshFor(cl => qMention == null || cl.q === qMention);
+        if (pool.length) return share(pool.slice(0, 2)) + (pool.length > 2 ? ' ' + V.more : '');
+        return qMention != null ? V.doneQ : V.done;
+      }
+      // 7. a statement: acknowledge it once
+      return direct ? pick(V.ok, said) : fid === 'f1' ? V.ack : '';
+    };
+    const out = respond();
+    if (!calmed) return out;
+    // reassured at last: a message with nothing else to answer gets what the teammate has
+    if (!out || V.ok.includes(out) || out === V.ack || out === V.hi) {
+      const pool = freshFor(() => true);
+      return V.calm + ' ' + (known.size && clashes.some(cl => !shared.has(cl.num)) ? tellClashes()
+        : pool.length ? share(pool.slice(0, 2)) + (pool.length > 2 ? ' ' + V.more : '') : V.done);
     }
-    // 6. a general request for reports, or for more
-    if (asked || MORE.test(text) || ALL.test(text) || qMention != null) {
-      const pool = freshFor(cl => qMention == null || cl.q === qMention);
-      if (pool.length) return share(pool.slice(0, 2)) + (pool.length > 2 ? ' ' + V.more : '');
-      return qMention != null ? V.doneQ : V.done;
-    }
-    // 7. a statement: acknowledge it once
-    return direct ? pick(V.ok, said) : fid === 'f1' ? V.ack : '';
+    return V.calm + ' ' + out;
   }
 
   root.MEL_SCRIPTED = { reply, VOICES };
@@ -2781,11 +3093,11 @@ YOUR MANNER IN THIS PUZZLE
 
   /**
    * Stream one teammate reply through the hosted proxy (no key in the browser). The proxy builds the
-   * teammate brief from the puzzle and teammate ids, so it can only play these teammates.
-   * Sent as text/plain so the browser needs no CORS preflight.
+   * teammate brief from the puzzle and teammate ids and the puzzle's twist ({ kind, fid, i } or null),
+   * so it can only play these teammates. Sent as text/plain so the browser needs no CORS preflight.
    */
-  async function hostedStream({ url, version, puzzle, follower, messages, signal, onText }) {
-    const res = await post(url, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ v: version, puzzle, follower, messages }) }, signal);
+  async function hostedStream({ url, version, puzzle, follower, twist, messages, signal, onText }) {
+    const res = await post(url, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ v: version, puzzle, follower, twist: twist || null, messages }) }, signal);
     if (!res.ok) throw await httpError(res);
     return readStream(res, signal, onText);
   }
@@ -3508,10 +3820,10 @@ YOUR MANNER IN THIS PUZZLE
   const SCR = window.MEL_SCRIPTED, COACH = window.MEL_COACH;
   const FOL = PZ.FOLLOWERS;
   const folName = id => (FOL.find(f => f.id === id) || { name: 'You' }).name;
-  // Quick suits visitors from a LinkedIn post; Standard and Extended add solo warm-ups, which a group comparison needs.
-  // Extended is Study 2's full set: three solo puzzles and six team puzzles.
+  // Quick is a demo for visitors from a LinkedIn post: two puzzles are too few to measure anything. Standard and
+  // Extended add solo warm-ups, which a group comparison needs. Extended is Study 2's full set: three solo puzzles and six team puzzles.
   const LENGTHS = {
-    quick: { label: 'Quick', time: 'about 10–15 min', desc: '2 team puzzles', warmups: 0, team: ['t1', 't2'] },
+    quick: { label: 'Quick demo', time: 'about 10–15 min', desc: '2 team puzzles, a first taste', warmups: 0, team: ['t1', 't2'] },
     standard: { label: 'Standard', time: 'about 20–25 min', desc: '1 warm-up and 4 team puzzles', warmups: 1, team: ['t1', 't2', 't3', 't4'] },
     extended: { label: 'Extended', time: 'about 40–45 min', desc: '3 warm-ups and 6 team puzzles, as in the study', warmups: 3, team: null }
   };
@@ -3523,7 +3835,8 @@ YOUR MANNER IN THIS PUZZLE
   const AI = {
     sample: null, sampleState: inClaude ? 'checking' : 'absent',
     settings: Object.assign({ engine: inClaude ? 'claude' : HOSTED_URL ? 'hosted' : 'scripted', model: 'claude-opus-5-5', minutes: 6, name: '', remember: false, apiKey: '', geminiKey: '' }, store.get('ai.settings', {})),
-    phase: 'intro', order: [], idx: 0, results: [], cur: null, notice: '', survey: { fun: null, fair: null, comment: '', sent: false },
+    // twists: the teammate twist drawn for each team puzzle of this test (puzzles.js, drawTwists)
+    phase: 'intro', order: [], twists: {}, idx: 0, results: [], cur: null, notice: '', survey: { fun: null, fair: null, comment: '', sent: false },
     root: () => $('#ai-root')
   };
   if (!AI.settings.remember) { AI.settings.apiKey = ''; AI.settings.geminiKey = ''; }
@@ -3620,13 +3933,13 @@ YOUR MANNER IN THIS PUZZLE
     const startBtn = () => h('button', { class: 'btn' + (pending ? '' : ' primary') + ' start-btn', type: 'button', onclick: startTest }, `${pending ? 'Start a new test' : 'Start'} · ${len.time}`);
     const setup = h('div', { class: 'panel flow', id: 'ai-setup' }, h('h3', {}, 'Start'),
       h('div', { class: 'field' }, h('label', {}, 'Length'), h('div', { class: 'length-cards' }, Object.keys(LENGTHS).map(lengthCard)),
-        len.warmups ? '' : h('span', { class: 'hint' }, 'To compare a group of people fairly, choose Standard: its warm-up measures how each person reasons alone.')),
+        len.warmups ? '' : h('span', { class: 'hint' }, 'Quick is a demo: two puzzles show how the test works but are too few to say much about how you lead. For a fuller reading choose Standard or Extended; to compare a group fairly, too, since their warm-ups measure how each person reasons alone.')),
       h('div', { class: 'field' }, h('label', {}, 'Teammates'), engines),
       AI.notice ? h('p', { class: 'note warn', id: 'ai-notice' }, AI.notice) : '',
       h('div', { class: 'btn-row' },
         pending ? h('button', { class: 'btn primary', type: 'button', disabled: resumeWait || null, onclick: resumeTest }, resumeWait ? 'Checking Claude…' : 'Resume your test') : '',
         startBtn(),
-        last && !pending ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.order = last.order || last.results.map(r => r.id); AI.survey = last.survey || { fun: null, fair: null, comment: '', sent: false }; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''),
+        last && !pending ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.order = last.order || last.results.map(r => r.id); AI.twists = last.twists || {}; AI.survey = last.survey || { fun: null, fair: null, comment: '', sent: false }; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''),
       h('p', { class: 'small muted' }, free ? 'No sign-up and no key. ' : '', pending ? 'You have an unfinished test saved in this browser. Starting a new test replaces it.' : 'You can stop after any team puzzle and still get your result. If you leave mid-test, your progress is saved in this browser and you can resume.'),
       more);
     put(root,
@@ -3641,10 +3954,10 @@ YOUR MANNER IN THIS PUZZLE
         setup,
         h('div', { class: 'panel prose' }, h('h3', {}, 'How it works'),
           h('ol', {},
-            h('li', {}, h('strong', {}, 'Lead the team. '), 'In each team puzzle you hold the case file and 8 reports; each teammate holds 8 more, half of them shared. Only you see the case file, so on their own your teammates can\'t tell which of their reports matter. Message everyone or one person. Teammates only talk to you, and like real teammates they differ: some hold back, some are surer than they should be.'),
+            h('li', {}, h('strong', {}, 'Lead the team. '), 'In each team puzzle you hold the case file and 8 reports; each teammate holds 8 more, half of them shared. Only you see the case file, so on their own your teammates can\'t tell which of their reports matter. Message everyone or one person. Teammates only talk to you.'),
             h('li', {}, h('strong', {}, 'Answer with probabilities. '), 'Each puzzle has two questions with five options. Each report is a fact about one option, and it rules that option out when it clashes with the case file; the options left standing are equally likely. Spread 100 points across them.'),
             h('li', {}, h('strong', {}, 'Get feedback on what you did. '), 'After each puzzle: which questions drew out decisive reports, which reports stayed hidden and who held them, and where your points went.'),
-            h('li', {}, h('strong', {}, 'See how you led. '), 'Your score, the leadership habits the study linked to better team results, a playful leadership style, and a result card to share.')),
+            h('li', {}, h('strong', {}, 'See how you led. '), 'Your leading score, which counts only the points lost in leading the team, your total score, the leadership habits the study linked to better team results, a playful leadership style, and a result card to share.')),
           h('p', { class: 'small muted' }, 'Standard and Extended start with solo warm-ups, where you see every report; they show how you reason on your own. Scores run from 0 to 100 (100 = exactly the right distribution; an even split scores 20–80). Your results stay in your browser unless you choose to send them at the end, without your name or chat. The page counts anonymously how many tests are started and finished, with no chat and no personal data. AI teammates receive only your chat messages; scripted teammates run entirely in your browser.'))),
       h('details', { class: 'panel', id: 'ai-group-wrap', open: AI.group.leaders.length ? true : null },
         h('summary', { class: 'group-summary' }, h('strong', {}, 'For teams and researchers: compare a group of test takers')),
@@ -3751,7 +4064,7 @@ YOUR MANNER IN THIS PUZZLE
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Enjoyment'), h('span', { class: 'value' }, rating(P.fun)), h('span', { class: 'sub' }, `${P.fun.n} rated`)),
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Fair feedback'), h('span', { class: 'value' }, rating(P.fair)), h('span', { class: 'sub' }, `${P.fair.n} rated`)),
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Team score'), h('span', { class: 'value' }, isFinite(P.median) ? Math.round(P.median) : '–'), h('span', { class: 'sub' }, isFinite(P.median) ? `median · middle half ${Math.round(P.q1)}–${Math.round(P.q3)} · range ${Math.round(P.min)}–${Math.round(P.max)}` : '')),
-      P.twists.total ? h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Teammate twists handled'), h('span', { class: 'value' }, `${P.twists.met} of ${P.twists.total}`), h('span', { class: 'sub' }, 'quiet teammates drawn out, wrong claims questioned')) : '');
+      P.twists.total ? h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Teammate twists handled'), h('span', { class: 'value' }, `${P.twists.met} of ${P.twists.total}`), h('span', { class: 'sub' }, 'teammates who made it harder, handled in full')) : '');
     const hist = h('div', { role: 'img', 'aria-label': 'Team scores of ' + P.scored + ' people in bands of 10 points: ' + P.bins.map(b => `${b.lo}–${b.hi}: ${b.n}`).join(', ') },
       h('div', { class: 'pilot-hist' }, P.bins.map(b => h('div', { class: 'bin' }, b.n ? String(b.n) : '', h('i', { style: { height: Math.round(72 * b.n / big) + 'px' } })))),
       h('div', { class: 'pilot-hist-axis', 'aria-hidden': 'true' }, P.bins.map(b => h('span', {}, b.lo === 90 ? '90+' : String(b.lo)))));
@@ -3795,7 +4108,7 @@ YOUR MANNER IN THIS PUZZLE
     const c = AI.phase === 'puzzle' ? AI.cur : null;
     if (c && c.paused) return;
     store.set('ai.progress', {
-      v: PZ.VERSION, savedAt: Date.now(), order: AI.order, idx: AI.idx, phase: AI.phase, results: AI.results,
+      v: PZ.VERSION, savedAt: Date.now(), order: AI.order, twists: AI.twists, idx: AI.idx, phase: AI.phase, results: AI.results,
       // the clock stops while the player is away: only the time used so far is kept
       cur: c && { id: c.puzzle.id, used: Date.now() - c.startedAt, mins: c.mins, locked: c.locked, messages: c.messages, seq: c.seq, to: c.to, draft: c.draft,
         answers: c.answers, out: c.out, engine: c.engine, shared: Object.fromEntries(FOL.map(f => [f.id, [...c.followers[f.id].shared]])),
@@ -3825,9 +4138,9 @@ YOUR MANNER IN THIS PUZZLE
     const pr = loadProgress();
     if (!pr) { renderIntro(); return; }
     AI.notice = '';
-    AI.order = pr.order; AI.idx = pr.idx; AI.results = pr.results || [];
+    AI.order = pr.order; AI.twists = pr.twists || {}; AI.idx = pr.idx; AI.results = pr.results || [];
     if (pr.phase === 'feedback') { AI.phase = 'feedback'; AI.render(); window.scrollTo(0, 0); return; }
-    const s = pr.cur, p = PZ.PUZZLES.find(x => x.id === s.id), startedAt = Date.now() - (+s.used || 0);
+    const s = pr.cur, p = PZ.withTwist(PZ.PUZZLES.find(x => x.id === s.id), AI.twists[s.id]), startedAt = Date.now() - (+s.used || 0);
     let engine = s.engine, note = '';
     if (!engineReady(engine)) {
       engine = engineReady('hosted') ? 'hosted' : 'scripted';
@@ -3891,13 +4204,15 @@ YOUR MANNER IN THIS PUZZLE
     if (AI.notice) { const n = $('#ai-notice'); if (n) n.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
     const L = LENGTHS[st.length] || LENGTHS.quick;
     AI.order = PZ.PUZZLES.filter(p => p.solo).slice(0, L.warmups).concat(PZ.PUZZLES.filter(p => !p.solo && (!L.team || L.team.includes(p.id)))).map(p => p.id);
+    // which teammate makes which puzzle harder, and how, is drawn afresh for every test
+    AI.twists = PZ.drawTwists(AI.order, Math.random);
     AI.idx = 0; AI.results = []; AI.survey = { fun: null, fair: null, comment: '', sent: false };
     pilotEvent({ kind: 'start', length: st.length, engine: st.engine });
     startPuzzle();
   }
 
   function startPuzzle() {
-    const p = PZ.PUZZLES.find(x => x.id === AI.order[AI.idx]);
+    const p = PZ.withTwist(PZ.PUZZLES.find(x => x.id === AI.order[AI.idx]), AI.twists[AI.order[AI.idx]]);
     const mins = p.solo ? (AI.settings.minutes ? 4 : 0) : AI.settings.minutes;
     AI.cur = {
       puzzle: p, startedAt: Date.now(), mins, deadline: mins ? Date.now() + mins * 60000 : null, locked: false,
@@ -4092,7 +4407,7 @@ YOUR MANNER IN THIS PUZZLE
       return LLM.geminiStream({ apiKey: AI.settings.geminiKey, model: LLM.GEMINI_MODEL, system, messages: turns, signal, onText: t => onText(cleanReply(t, fid)) }).then(r => r.text);
     }
     if (c.engine === 'hosted') {
-      return LLM.hostedStream({ url: HOSTED_URL, version: PZ.VERSION, puzzle: c.puzzle.id, follower: fid, messages: turns, signal, onText: t => onText(cleanReply(t, fid)) }).then(r => r.text);
+      return LLM.hostedStream({ url: HOSTED_URL, version: PZ.VERSION, puzzle: c.puzzle.id, follower: fid, twist: c.puzzle.twist, messages: turns, signal, onText: t => onText(cleanReply(t, fid)) }).then(r => r.text);
     }
     if (c.engine === 'claude') {
       const input = [{ role: 'user', content: system + `\n\nThe chat follows. Reply with ${f.name}'s next chat message only.` }].concat(turns);
@@ -4258,7 +4573,7 @@ YOUR MANNER IN THIS PUZZLE
     const flat = p.questions.map(q => S.credenceScore([20, 20, 20, 20, 20], S.correctDist(q.answer, 5)));
     const timeLeft = c.deadline ? Math.max(0, (c.deadline - Date.now()) / 1000) : null;
     const analysis = COACH.analyse(p, c.messages, c.answers, { timeLeft });
-    AI.results.push({ id: p.id, version: PZ.VERSION, title: p.title, solo: !!p.solo, scores, flat, answers: c.answers.map(a => a.slice()), seconds: elapsed(), metrics: p.solo ? null : analysis.metrics, analysis, transcript: c.messages.slice(), engine: c.engine, model: c.engine === 'api' ? AI.settings.model : (c.engine === 'gemini' || c.engine === 'hosted') ? LLM.GEMINI_MODEL : null });
+    AI.results.push({ id: p.id, version: PZ.VERSION, title: p.title, solo: !!p.solo, twist: p.twist || null, scores, flat, answers: c.answers.map(a => a.slice()), seconds: elapsed(), metrics: p.solo ? null : analysis.metrics, analysis, transcript: c.messages.slice(), engine: c.engine, model: c.engine === 'api' ? AI.settings.model : (c.engine === 'gemini' || c.engine === 'hosted') ? LLM.GEMINI_MODEL : null });
     if (!p.solo) pilotEvent({ kind: 'puzzle', puzzle: p.id, engine: c.engine });
     AI.phase = 'feedback';
     saveProgress();
@@ -4270,15 +4585,17 @@ YOUR MANNER IN THIS PUZZLE
     if (r.analysis || r.version !== PZ.VERSION) return r;
     const p = PZ.PUZZLES.find(x => x.id === r.id);
     if (!p) return r;
-    r.analysis = COACH.analyse(p, r.transcript || [], r.answers);
+    r.analysis = COACH.analyse(PZ.withTwist(p, r.twist), r.transcript || [], r.answers);
     if (!r.solo) r.metrics = Object.assign({}, r.metrics, r.analysis.metrics);
     return r;
   }
 
-  /** Stacked bar: the score, points lost in using the reports, points lost to reports that stayed hidden. */
+  /** Stacked bar: the score, points lost in reasoning (using the reports you had), and points lost in leading
+   * (reports that stayed hidden, and a teammate's wrong claim taken on board). */
   function pointsSplit(info, solo) {
-    const sc = Math.round(info.actual), use = Math.round(info.use), hid = Math.max(0, 100 - sc - use);
-    const segs = solo ? [['score', sc, 'Your score'], ['use', 100 - sc, 'lost in reasoning']] : [['score', sc, 'Your score'], ['use', use, 'lost in using the reports you had'], ['hidden', hid, 'lost to reports that stayed hidden']];
+    const tw = info.twist || 0, sc = Math.round(info.actual), use = Math.round(Math.max(0, info.use - tw)), lead = Math.max(0, 100 - sc - use);
+    const segs = solo ? [['score', sc, 'Your score'], ['use', 100 - sc, 'lost in reasoning']]
+      : [['score', sc, 'Your score'], ['use', use, 'lost in reasoning: using the reports you had'], ['hidden', lead, 'lost in leading: reports that stayed hidden' + (tw >= 0.5 ? ' or a wrong claim you accepted' : '')]];
     return h('div', { class: 'split' },
       h('div', { class: 'split-bar', role: 'img', 'aria-label': segs.map(([, v, l]) => l === 'Your score' ? `Score ${v}` : `${v} points ${l}`).join('; ') },
         segs.map(([k, v]) => h('div', { class: 'seg-' + k, style: { width: v + '%' } }))),
@@ -4322,7 +4639,8 @@ YOUR MANNER IN THIS PUZZLE
       pointsSplit(A.info),
       obsLists(obs.good, obs.tips),
       h('div', { class: 'stats' },
-        h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Hidden reports surfaced'), h('span', { class: 'value' }, `${m.surfaced} of ${m.critical}`), h('span', { class: 'sub' }, 'decisive reports your teammates passed on')),
+        h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Leading score'), h('span', { class: 'value' }, Math.round(A.info.lead), h('span', { class: 'small muted' }, ' / 100')), h('span', { class: 'sub' }, 'your score without the points lost in reasoning')),
+        h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Hidden reports surfaced'), h('span', { class: 'value' }, `${m.surfaced} of ${m.critical}`), h('span', { class: 'sub' }, 'decisive reports your teammates passed on')),
         h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Questions'), h('span', { class: 'value' }, m.questions), h('span', { class: 'sub' }, `${m.targeted} specific · ${m.generic} general · ${m.repeats} repeated`)),
         h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Follow-ups'), h('span', { class: 'value' }, m.followUps), h('span', { class: 'sub' }, `built on a teammate's answer` + (m.connects ? ` · ${m.connects} passed on to others` : ''))),
         h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Asked directly'), h('span', { class: 'value' }, `${m.askedDirect.length} of 3`), h('span', { class: 'sub' }, m.askedDirect.length ? m.askedDirect.map(folName).join(', ') : 'only messages to everyone')),
@@ -4352,7 +4670,7 @@ YOUR MANNER IN THIS PUZZLE
   }
 
   // the last finished test, with its puzzle order (how far the player got) and their pilot ratings
-  const saveLast = () => store.set('ai.last', { results: AI.results, order: AI.order, survey: AI.survey, name: AI.settings.name, when: new Date().toISOString() });
+  const saveLast = () => store.set('ai.last', { results: AI.results, order: AI.order, twists: AI.twists, survey: AI.survey, name: AI.settings.name, when: new Date().toISOString() });
 
   function summaryNumbers(results) {
     results.forEach(ensureAnalysis);
@@ -4374,9 +4692,12 @@ YOUR MANNER IN THIS PUZZLE
   const RATING = { strong: 'Strong', efficient: 'Efficient', some: 'Some', little: 'Little' };
   const goodRating = r => r === 'strong' || r === 'efficient';
   function shareText(N, style) {
-    return `I just led a team of AI agents through ${N.team.length} hidden-profile puzzles: team score ${Math.round(N.teamScore)}/100, ${N.surfaced} of ${N.critical} hidden clues surfaced, leadership style "${style.name}". ` +
+    return `I just led a team of AI agents through ${N.demo ? 'the quick demo of a leadership test, ' : ''}${N.team.length} hidden-profile puzzles: leading score ${Math.round(N.lead)}/100 (team score ${Math.round(N.teamScore)}), ${N.surfaced} of ${N.critical} hidden clues surfaced, leadership style "${style.name}". ` +
       `It's a playful test inspired by Weidmann, Xu & Deming's research on measuring leadership with AI agents. Try it: ${APP_URL}`;
   }
+  // the puzzle order a result came from, and whether it was the Quick demo
+  const orderOf = R => (AI.order.length ? AI.order : R.map(r => r.id));
+  const isDemo = R => lengthOf(orderOf(R)) === 'quick';
   async function drawCard(N, hb, style, name) {
     const W = 1200, H = 627, c = document.createElement('canvas');
     c.width = W; c.height = H;
@@ -4387,16 +4708,17 @@ YOUR MANNER IN THIS PUZZLE
     g.fillStyle = '#eef2f1'; g.fillRect(0, 0, W, H);
     g.fillStyle = '#ffffff'; g.fillRect(36, 36, W - 72, H - 72);
     g.fillStyle = accent; g.fillRect(36, 36, 12, H - 72);
-    g.fillStyle = ink2; g.font = body('600 20px'); g.fillText('MANAGER EFFECT LAB  ·  LEADERSHIP TEST', 88, 96);
+    g.fillStyle = ink2; g.font = body('600 20px'); g.fillText('MANAGER EFFECT LAB  ·  LEADERSHIP TEST' + (N.demo ? '  ·  QUICK DEMO' : ''), 88, 96);
     const title = (name ? name + ' led' : 'I led') + ' a team of AI agents';
     let ts = 46;
     g.font = display(`700 ${ts}px`);
     while (g.measureText(title).width > W - 176 && ts > 20) { ts -= 2; g.font = display(`700 ${ts}px`); }
     g.fillStyle = ink; g.fillText(title, 88, 152);
-    const score = String(Math.round(N.teamScore));
+    const score = String(Math.round(N.lead));
     g.fillStyle = accent; g.font = display('700 140px'); g.fillText(score, 84, 318);
     const sw = g.measureText(score).width;
-    g.fillStyle = ink2; g.font = body('500 26px'); g.fillText('/ 100', 96 + sw, 278); g.fillText('team score', 96 + sw, 314);
+    g.fillStyle = ink2; g.font = body('500 26px'); g.fillText('/ 100', 96 + sw, 262); g.fillText('leading score', 96 + sw, 296);
+    g.font = body('400 20px'); g.fillText(`team score ${Math.round(N.teamScore)}`, 96 + sw, 326);
     g.fillStyle = ink2; g.font = body('600 20px'); g.fillText('LEADERSHIP STYLE (FOR FUN)', 640, 222);
     g.fillStyle = ink; g.font = display('700 50px'); g.fillText(style.name, 640, 282);
     g.strokeStyle = rule; g.lineWidth = 2; g.beginPath(); g.moveTo(88, 350); g.lineTo(W - 88, 350); g.stroke();
@@ -4430,13 +4752,14 @@ YOUR MANNER IN THIS PUZZLE
 
   function renderSummary() {
     const R = AI.results, root = AI.root(), N = summaryNumbers(R), name = (AI.settings.name || '').trim();
+    N.demo = isDemo(R);
     const cell = (r, f) => h('td', { class: 'num' }, r.metrics && r.metrics[f] != null ? r.metrics[f] : '–');
     const rows = R.map(r => h('tr', {},
       h('td', {}, r.title + (r.solo ? ' (solo)' : '')), h('td', { class: 'num' }, Math.round(r.scores[0])), h('td', { class: 'num' }, Math.round(r.scores[1])),
       h('td', { class: 'num' }, r.metrics ? `${r.metrics.surfaced}/${r.metrics.critical}` : '–'), cell(r, 'questions'), cell(r, 'targeted'), cell(r, 'repeats'), cell(r, 'followUps'),
       cell(r, 'turns'), cell(r, 'words'),
       h('td', { class: 'num' }, Math.floor(r.seconds / 60) + ':' + String(r.seconds % 60).padStart(2, '0'))));
-    const head = h('div', { class: 'section-head' }, h('div', { class: 'eyebrow' }, 'Your result' + (name ? ' · ' + name : '')), h('h2', {}, 'How you led your AI team'));
+    const head = h('div', { class: 'section-head' }, h('div', { class: 'eyebrow' }, (N.demo ? 'Your Quick demo result' : 'Your result') + (name ? ' · ' + name : '')), h('h2', {}, 'How you led your AI team'));
     const again = h('button', { class: 'btn quiet', type: 'button', onclick: () => { AI.phase = 'intro'; AI.render(); } }, 'Take the test again');
     if (!N.team.length) { put(root, head, h('div', { class: 'panel' }, h('p', {}, 'Complete the team puzzles to see a result.'), again)); return; }
     const hb = COACH.habits(N), style = COACH.leaderStyle(hb, N);
@@ -4449,19 +4772,23 @@ YOUR MANNER IN THIS PUZZLE
     const text = shareText(N, style);
     put(root, head,
       h('div', { class: 'panel flow' },
+        N.demo ? h('div', { class: 'note' }, h('p', { style: { margin: 0 } }, h('strong', {}, 'This was the Quick demo. '), 'Two puzzles show how the test works, but they are too few to say much about how you lead: one teammate\'s behaviour or one lucky guess can swing the result. For a fuller reading, take Standard (four team puzzles) or Extended (the study\'s six).'),
+          h('div', { class: 'btn-row', style: { marginTop: '10px' } }, h('button', { class: 'btn', type: 'button', onclick: () => { AI.settings.length = 'standard'; saveSettings(); AI.phase = 'intro'; AI.render(); window.scrollTo(0, 0); } }, 'Set up the Standard test'))) : '',
         h('div', { class: 'result-hero' },
-          h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Team-puzzle score'), h('span', { class: 'value big' }, Math.round(N.teamScore), h('span', { class: 'small muted' }, ' / 100')), h('span', { class: 'sub' }, `mean of ${N.nq} questions` + (range ? ' · ' + range : ''))),
+          h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Leading score'), h('span', { class: 'value big' }, Math.round(N.lead), h('span', { class: 'small muted' }, ' / 100')),
+            h('span', { class: 'sub' }, `points kept in leading the team · team score ${Math.round(N.teamScore)}` + (range ? ' (' + range + ')' : '') + `, mean of ${N.nq} questions`)),
           h('div', { class: 'style-box' }, h('span', { class: 'eyebrow' }, 'Your leadership style · for fun'), h('h3', {}, style.name), h('p', {}, style.text))),
+        h('p', { class: 'small muted' }, 'The leading score is 100 minus the points you lost in leading: reports your teammates held that never reached you, and wrong claims from teammates that you took on board. It leaves out the points lost in reasoning with the reports you had, so it is closer to what the study calls leadership than the team score, which mixes both.'),
         h('h3', {}, 'What you did, specifically'),
         obsLists(N.strengths, N.tips, 'What you did well', 'Try next time'),
         N.challenges.length ? [h('h3', {}, 'Teammates who made it harder'),
-          h('ul', { class: 'twists' }, N.challenges.map(c => h('li', {}, h('span', { class: 'pill' + (c.met ? ' pos' : c.kept ? '' : ' neg') }, h('span', { class: 'dot' }), c.met ? 'Handled' : c.kept ? 'Partly' : 'Missed'), h('span', {}, h('span', { class: 'obs-where' }, c.puzzle + ': '), twistText(c))))),
-          h('p', { class: 'small muted' }, 'As in real teams, some teammates hold back and some are surer than they should be. Drawing out a quiet teammate and checking a confident claim are leadership moves too, beyond asking the right questions.')] : '',
+          h('ul', { class: 'twists' }, N.challenges.map(c => { const st = twistState(c); return h('li', {}, h('span', { class: 'pill' + (st === 'met' ? ' pos' : st === 'partly' ? '' : ' neg') }, h('span', { class: 'dot' }), st === 'met' ? 'Handled' : st === 'partly' ? 'Partly' : 'Missed'), h('span', {}, h('span', { class: 'obs-where' }, c.puzzle + ': '), twistText(c))); })),
+          h('p', { class: 'small muted' }, 'As in real teams, teammates differ. Each test draws afresh which teammate, if any, makes a puzzle harder and how. Drawing out a quiet or worried teammate, checking a confident claim or a quote, and settling a disagreement on the evidence are leadership moves too, beyond asking the right questions.')] : '',
         h('h3', {}, 'Where your points went'),
-        pointsSplit({ actual: N.teamScore, use: N.use, hidden: N.hidden }),
-        h('p', { class: 'small muted' }, 'Points lost to reports that stayed hidden reflect leading: drawing out what your teammates knew. Points lost in using the reports you had reflect reasoning. A report counts as drawn out only when a teammate cited its number, so the hidden part can be overstated if teammates paraphrased.'),
+        pointsSplit({ actual: N.teamScore, use: N.use, hidden: N.hidden, twist: N.twist }),
+        h('p', { class: 'small muted' }, 'Points lost in leading: reports that stayed hidden, and wrong claims from teammates that you took on board. Points lost in reasoning: how you used the reports you had. A report counts as drawn out only when a teammate cited its number, so the leading part can be overstated if teammates paraphrased.'),
         h('h3', {}, 'The habits behind good leadership'),
-        h('p', { class: 'small muted' }, 'In Study 2, these behaviours separated effective leaders from the rest. Ratings use rough thresholds set for these puzzles, not norms.'),
+        h('p', { class: 'small muted' }, 'In Study 2, these behaviours separated effective leaders from the rest. Ratings use rough thresholds set for these puzzles, not norms.' + (N.demo ? ' With two puzzles they are a first impression, not a measurement.' : '')),
         h('div', { class: 'habits' }, hb.map(x => h('div', { class: 'habit' },
           h('div', {}, h('strong', {}, x.label), h('p', { class: 'small muted' }, x.note)),
           h('span', { class: 'mono' }, x.value),
@@ -4500,7 +4827,7 @@ YOUR MANNER IN THIS PUZZLE
     function redraw() {
       drawCard(N, hb, style, (AI.settings.name || '').trim()).then(c => {
         canvas = c;
-        put(cardBox, h('img', { src: c.toDataURL('image/png'), alt: `Result card: team score ${Math.round(N.teamScore)} out of 100, leadership style ${style.name}, ${hb.map(x => x.label + ' ' + RATING[x.rating].toLowerCase()).join(', ')}.` }));
+        put(cardBox, h('img', { src: c.toDataURL('image/png'), alt: `Result card${N.demo ? ' (Quick demo)' : ''}: leading score ${Math.round(N.lead)} out of 100, team score ${Math.round(N.teamScore)}, leadership style ${style.name}, ${hb.map(x => x.label + ' ' + RATING[x.rating].toLowerCase()).join(', ')}.` }));
       }).catch(() => put(cardBox, h('span', { class: 'small muted' }, 'The result card could not be drawn in this browser.')));
     }
     redraw();
@@ -4509,7 +4836,8 @@ YOUR MANNER IN THIS PUZZLE
   const sampleText = N => (['no', 'one', 'two', 'three', 'four', 'five', 'six'][N.team.length] || N.team.length) + ' team puzzle' + (N.team.length === 1 ? '' : 's');
   function interpret(N) {
     if (!N.team.length) return 'Complete the team puzzles to see a result.';
-    return `Your score describes this game only: it mixes how well you led with how well you reason on your own, and ${sampleText(N)} is a small sample` +
+    if (N.demo) return 'This was the Quick demo, so read it as a first impression of the game, not a measurement: two puzzles are a very small sample, and which teammate made things harder was drawn at random. There are no norms for this version, so it cannot say how you compare with the leaders in Study 2 or with other people.';
+    return `Your score describes this game only: the team score mixes how well you led with how well you reason on your own, the leading score is closer to leading alone, and ${sampleText(N)} is a small sample` +
       (rangeText(N) ? ` (${rangeText(N)})` : '') +
       '. There are no norms for this version, so it cannot say how you compare with the leaders in Study 2 or with other people.' +
       (N.soloN ? '' : ' Without a warm-up this result cannot be adjusted for reasoning skill in a group comparison; the Standard length includes one.');
@@ -4520,11 +4848,13 @@ YOUR MANNER IN THIS PUZZLE
     const uniq = xs => [...new Set(xs.filter(Boolean))].join('+');
     const style = N.team.length ? COACH.leaderStyle(COACH.habits(N), N).name : '';
     const ch = N.challenges || [], kind = k => ch.filter(c => c.kind === k), frac = xs => (xs.length ? xs.filter(c => c.met).length + '/' + xs.length : '');
+    const order = orderOf(R);
     const row = { name: AI.settings.name || '', finished: new Date().toISOString(), test_version: R[0] && R[0].version || 1, engine: uniq(R.map(r => r.engine)), model: uniq(R.map(r => r.model)),
-      length: lengthOf(AI.order.length ? AI.order : R.map(r => r.id)), team_puzzles_planned: teamCount(AI.order.length ? AI.order : R.map(r => r.id)), team_puzzles_done: N.team.length,
-      team_score: fmt(N.teamScore, 2), team_score_low: fmt(N.teamLo, 2), team_score_high: fmt(N.teamHi, 2), questions_solved: N.solved, questions: N.nq, solo_score: fmt(N.soloScore, 2), solo_questions: N.soloN,
-      style, info_surfaced: N.surfaced, info_total: N.critical, twists_met: ch.filter(c => c.met).length, twists_total: ch.length, quiet_drawn_out: frac(kind('quiet')), claims_checked: frac(kind('sure')),
-      questions_per_puzzle: fmt(N.questions, 2), specific_questions_per_puzzle: fmt(N.targeted, 2), repeated_questions_per_puzzle: fmt(N.repeats, 2), followups_per_puzzle: fmt(N.followUps, 2), turns_per_puzzle: fmt(N.turns, 2), words_per_puzzle: fmt(N.words, 1), we_per_100_words: fmt(N.weRate, 2), points_lost_hidden: fmt(N.hidden, 2), points_lost_use: fmt(N.use, 2),
+      length: lengthOf(order), team_puzzles_planned: teamCount(order), team_puzzles_done: N.team.length,
+      leading_score: fmt(N.lead, 2), team_score: fmt(N.teamScore, 2), team_score_low: fmt(N.teamLo, 2), team_score_high: fmt(N.teamHi, 2), questions_solved: N.solved, questions: N.nq, solo_score: fmt(N.soloScore, 2), solo_questions: N.soloN,
+      style, info_surfaced: N.surfaced, info_total: N.critical, twist_plan: twistPlanCode(order), twists_met: ch.filter(c => c.met).length, twists_total: ch.length,
+      quiet_drawn_out: frac(kind('quiet')), worried_reassured: frac(kind('anxious')), claims_checked: frac(kind('sure')), quotes_checked: frac(kind('misquote')), disputes_settled: frac(kind('dispute')),
+      questions_per_puzzle: fmt(N.questions, 2), specific_questions_per_puzzle: fmt(N.targeted, 2), repeated_questions_per_puzzle: fmt(N.repeats, 2), followups_per_puzzle: fmt(N.followUps, 2), turns_per_puzzle: fmt(N.turns, 2), words_per_puzzle: fmt(N.words, 1), we_per_100_words: fmt(N.weRate, 2), points_lost_hidden: fmt(N.hidden, 2), points_lost_use: fmt(N.use, 2), points_lost_twists: fmt(N.twist, 2),
       fun: sv.fun || '', fair: sv.fair || '', comment: (sv.comment || '').trim() };
     R.forEach(r => { row[r.id + '_q1'] = fmt(r.scores[0], 1); row[r.id + '_q2'] = fmt(r.scores[1], 1); });
     Object.keys(row).forEach(k => { if (typeof row[k] === 'string') row[k] = row[k].replace(/−/g, '-'); });
@@ -4533,7 +4863,7 @@ YOUR MANNER IN THIS PUZZLE
   function exportAI(kind) {
     const R = AI.results, N = summaryNumbers(R), name = AI.settings.name || '';
     const version = R[0] && R[0].version || 1;
-    if (kind === 'json') { offerFile('ai_leadership_test.json', JSON.stringify({ name, finished: new Date().toISOString(), test_version: version, summary: N.team.length ? { team_score: N.teamScore, team_score_range: [N.teamLo, N.teamHi], solved: N.solved, questions: N.nq, solo_score: N.soloScore, solo_questions: N.soloN, points_lost_hidden: N.hidden, points_lost_use: N.use } : null, survey: AI.survey, puzzles: R }, null, 2), 'application/json'); return; }
+    if (kind === 'json') { offerFile('ai_leadership_test.json', JSON.stringify({ name, finished: new Date().toISOString(), test_version: version, twists: AI.twists, summary: N.team.length ? { leading_score: N.lead, points_lost_twists: N.twist, team_score: N.teamScore, team_score_range: [N.teamLo, N.teamHi], solved: N.solved, questions: N.nq, solo_score: N.soloScore, solo_questions: N.soloN, points_lost_hidden: N.hidden, points_lost_use: N.use } : null, survey: AI.survey, puzzles: R }, null, 2), 'application/json'); return; }
     const row = resultRow();
     offerFile('ai_leadership_test.csv', toCSV(Object.keys(row), [row]), 'text/csv');
   }
@@ -4568,13 +4898,30 @@ YOUR MANNER IN THIS PUZZLE
       h('div', { class: 'btn-row' }, PILOT_URL ? send : '', status),
       h('p', { class: 'small muted' }, (PILOT_URL ? '"Send anonymously" sends your scores, leadership style, these ratings and your comment, never your name or your chat. ' : '') + 'Your ratings are also added to the results file you download.'));
   }
-  // the puzzles' twists, as the leader met them
+  // the puzzles' twists, as the leader met them ('met' | 'partly' | 'missed'; older results marked a half-checked claim with `kept`)
+  const twistState = c => (c.met ? 'met' : c.partly || (c.kind === 'sure' && c.kept) ? 'partly' : 'missed');
   function twistText(c) {
-    const nm = folName(c.fid);
-    if (c.kind === 'quiet') return c.met ? `${nm} held back when you wrote to everyone, and you drew ${nm} out.` : `${nm} held back when you wrote to everyone, and ${nm}'s decisive reports stayed hidden.`;
-    return c.met ? `${nm} claimed a report rules out an option that it doesn't, and you questioned the claim instead of taking it on trust.`
-      : c.kept ? `${nm} claimed a report rules out an option that it doesn't. You kept that option among the possibilities, but the chat doesn't show you questioning the claim.`
+    const nm = folName(c.fid), st = twistState(c);
+    if (c.kind === 'quiet') return st === 'met' ? `${nm} held back when you wrote to everyone, and you drew ${nm} out.` : `${nm} held back when you wrote to everyone, and ${nm}'s decisive reports stayed hidden.`;
+    if (c.kind === 'anxious') return st === 'met' ? `${nm} was too worried to share until reassured. You reassured ${nm} and drew out what ${nm} held.`
+      : st === 'partly' ? `${nm} was too worried to share until reassured. You reassured ${nm}, but some of ${nm}'s decisive reports still stayed hidden.`
+      : `${nm} was too worried to share until reassured, and never got that reassurance, so ${nm}'s decisive reports stayed hidden.`;
+    if (c.kind === 'misquote') return st === 'met' ? `${nm} misquoted a shared report so that it seemed to rule out a right answer, and you checked the quote instead of taking it on trust.`
+      : st === 'partly' ? `${nm} misquoted a shared report so that it seemed to rule out a right answer. You kept that option, but the chat doesn't show you correcting the quote.`
+      : `${nm} misquoted a shared report so that it seemed to rule out a right answer, and you ruled that answer out.`;
+    if (c.kind === 'dispute') return st === 'met' ? `${nm} argued for keeping an option the reports rule out. You took it up and settled it on the evidence.`
+      : st === 'partly' ? `${nm} argued for keeping an option the reports rule out. You ruled it out, but the chat doesn't show you taking up the objection.`
+      : `${nm} argued for keeping an option the reports rule out, and you kept it.`;
+    return st === 'met' ? `${nm} claimed a report rules out an option that it doesn't, and you questioned the claim instead of taking it on trust.`
+      : st === 'partly' ? `${nm} claimed a report rules out an option that it doesn't. You kept that option among the possibilities, but the chat doesn't show you questioning the claim.`
       : `${nm} claimed a report rules out an option that it doesn't, and you ruled it out.`;
+  }
+  /** The twist drawn for each team puzzle, compactly, for the results file: "1Q3 2- 3S1" = puzzle t1 quiet Jonas (f3),
+   * t2 none, t3 overconfident Mira (f1). Kinds: Q quiet, A worried, S overconfident, M misquote, D dispute. */
+  function twistPlanCode(order) {
+    const K = { quiet: 'Q', anxious: 'A', sure: 'S', misquote: 'M', dispute: 'D' };
+    const of = id => (id in AI.twists ? AI.twists[id] : (AI.results.find(r => r.id === id) || {}).twist);
+    return order.filter(id => /^t\d$/.test(id)).map(id => { const t = of(id); return id.slice(1) + (t ? K[t.kind] + t.fid.slice(1) : '-'); }).join(' ');
   }
 
   /* ================= boot ================= */

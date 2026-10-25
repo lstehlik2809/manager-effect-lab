@@ -1,8 +1,8 @@
 // Hosted AI teammates for the Manager Effect Lab leadership test (Cloudflare Worker).
 // Visitors need no API key: the worker holds one Gemini key as a secret and plays only the test's
-// teammates. It builds each teammate's brief itself from the puzzle and teammate ids (the same
-// followerBrief and request settings as the browser), so it cannot be used as a general-purpose
-// model proxy. It caps requests per visitor per minute and for everyone per day.
+// teammates. It builds each teammate's brief itself from the puzzle and teammate ids and the twist drawn
+// for the test (the same followerBrief and request settings as the browser), so it cannot be used as a
+// general-purpose model proxy. It caps requests per visitor per minute and for everyone per day.
 // It also collects pilot data: anonymous counts of tests started, team puzzles finished and tests
 // finished (no chat, no personal data, no IP), and results that a player chooses to send at the end
 // (scores, style, ratings and comment, never a name or the chat). The owner reads them with
@@ -21,6 +21,8 @@ function validate(body) {
   if (!body || typeof body !== 'object') return 'Body must be a JSON object.';
   const p = PZ.PUZZLES.find(x => x.id === body.puzzle && !x.solo), f = PZ.FOLLOWERS.find(x => x.id === body.follower);
   if (!p || !f) return 'Unknown puzzle or teammate.';
+  // the twist drawn for this test, if any: only one of the puzzle's own
+  if (body.twist != null && !PZ.twistValid(p, body.twist)) return 'Unknown twist.';
   const msgs = body.messages;
   if (!Array.isArray(msgs) || !msgs.length || msgs.length > MAX_TURNS || msgs.length % 2 === 0) return 'The chat must start and end with the leader.';
   let total = 0;
@@ -31,7 +33,7 @@ function validate(body) {
     total += m.content.length;
   }
   if (total > MAX_TOTAL) return 'The chat is too long.';
-  return { p, f, msgs: msgs.map(m => ({ role: m.role, content: m.content })) };
+  return { p: PZ.withTwist(p, body.twist), f, msgs: msgs.map(m => ({ role: m.role, content: m.content })) };
 }
 
 /** A pilot count: which of a fixed set of things happened, never who did it. Returns its counter key or an error text. */

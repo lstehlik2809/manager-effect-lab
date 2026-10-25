@@ -14,6 +14,12 @@
  * everything a couple of reports at a time.
  * The original's three follower roles are rotated over Mira, Theo and Jonas from puzzle to puzzle, so no
  * teammate is always the one holding the most.
+ * Teammate twists are drawn at random for each test (drawTwists): a team puzzle gets no twist or one of
+ * five kinds, played by one teammate. A quiet teammate holds back in replies to everyone, a worried one
+ * shares only once reassured, an overconfident one claims a clash that isn't there, one misquotes a shared
+ * report so that it seems to rule out a right answer, and one argues that an option the reports rule out
+ * should stay in. withTwist applies a draw to a puzzle as its `dynamics`, which the scripted teammates,
+ * the LLM briefs and the feedback read.
  * Three solo puzzles (every report visible) measure individual reasoning, the hard skill that the group
  * analysis controls for; Study 2 also used three individual puzzles.
  * Report numbers are assigned by a fixed shuffle so they reveal nothing about who holds what. */
@@ -21,7 +27,7 @@
   'use strict';
 
   // Bump when puzzles or scoring change: scores from different versions are not comparable.
-  const VERSION = 5;
+  const VERSION = 6;
 
   const FOLLOWERS = [
     { id: 'f1', name: 'Mira' },
@@ -40,15 +46,20 @@
    * case facts (leader only) as [text, key words], and its 10 reports in slot order: a string for a fact
    * that fits the case file, or [text, option, fact] for a fact that rules that option out against case
    * fact number `fact`. The key words let the scripted teammates and the feedback notice when the leader
-   * passes a case fact on. dynamics (optional): { quiet: teammate id } or { sure: { fid, q, report, option,
-   * says, why } }, where report is a regular expression for the report the teammate misreads and says is
-   * the reason the teammate gives. */
-  function team(id, mirrors, layout, roles, title, scenario, questions, dynamics) {
+   * passes a case fact on. twists: the reports the drawn twists can use, each a list of candidates:
+   * sure: { q, fact, report, option, says, why }: a teammate who can see `report` (a regular expression)
+   *   claims it rules out `option`, a right answer, against case fact `fact`, because `says`;
+   * misquote: { q, fact, report, option, misquote, why }: a teammate quotes shared report `report` as
+   *   `misquote`, which would rule out `option` against case fact `fact`;
+   * dispute: { q, option, report, says, why }: a teammate who can see `report` argues that `option`, which a
+   *   decisive report rules out, stays in, because `says`.
+   * why explains, for the feedback, why the claim is wrong. Quiet and worried teammates need no data. */
+  function team(id, mirrors, layout, roles, title, scenario, questions, twists) {
     const slots = LAYOUTS[layout], who = s => (s in roles ? roles[s] : s);
     const clues = questions.flatMap((q, qi) => q.reports.map((r, i) => Array.isArray(r)
       ? { q: qi, holder: who(slots[i]), kind: 'out', rules: [r[1]], fact: r[2], text: r[0] }
       : { q: qi, holder: who(slots[i]), kind: 'noise', text: r }));
-    const p = { id, mirrors, layout, title, scenario, clues, dynamics: dynamics || {},
+    const p = { id, mirrors, layout, title, scenario, clues, dynamics: {}, twists: Object.assign({ sure: [], misquote: [], dispute: [] }, twists),
       questions: questions.map(q => ({ text: q.text, options: q.options, answer: q.answer, facts: q.facts.map(f => ({ text: f[0], keys: f[1].split(' ') })) })) };
     return p;
   }
@@ -159,7 +170,15 @@
             ['Linden & Sons made only gilded frames.', 0, 0],
             ['Oakley Brothers stamped their name on the back of every frame.', 3, 2],
             ['Marlow Frames joined every corner with metal brackets.', 1, 1]] }
-      ], { quiet: 'f3' }),
+      ], {
+        sure: [{ q: 0, fact: 1, report: /^Clara Moss painted in oils from 1955/, option: 2,
+          says: 'the pigment was first made in 1950 and she only started painting in oils in 1955',
+          why: 'a pigment first made in 1950 was still there to use in 1955 and later. A date rules an artist out only when they stopped painting before the pigment existed, as Elin Berg did.' }],
+        misquote: [{ q: 0, fact: 1, report: /^Clara Moss painted in oils from 1955/, option: 2, misquote: 'Clara Moss painted in oils only until 1945.',
+          why: 'the shared report says Clara Moss painted in oils from 1955 onwards, which fits a pigment first made in 1950.' }],
+        dispute: [{ q: 1, option: 0, report: /^Linden & Sons put a paper label/, says: 'an unlabelled frame could still be theirs',
+          why: 'the missing label fits, but Linden & Sons made only gilded frames and this frame has no gilding.' }]
+      }),
     team('t2', 'F2', 'Y', { F1: 'f2', F2: 'f3', F3: 'f1' }, 'The Rooftop Garden',
       'Your company is turning the office roof into a garden for staff. Your team must work out which plants can be grown there and which watering methods can be used.', [
         { text: 'Which plants can be grown on the roof?', options: ['Lavender', 'Tomatoes', 'Sunflowers', 'Bamboo', 'Strawberries'], answer: [0, 1, 2, 4],
@@ -193,9 +212,15 @@
             ['Sprinklers throw water in a wide spray up to eight metres.', 1, 0],
             ['A full rain barrel weighs about 250 kg per square metre of floor.', 2, 1],
             ['In summer, a hand-watering rota needs someone on the roof every day, weekends included.', 4, 2]] }
-      ], { sure: { fid: 'f2', q: 0, fact: 0, report: /^Strawberries have shallow roots/, option: 4,
-        says: 'the beds are 40 cm deep and strawberry roots only reach 15 cm',
-        why: 'roots that reach 15 cm fit easily in beds 40 cm deep. A bed rules a plant out only when the plant needs a deeper one, as bamboo does.' } }),
+      ], {
+        sure: [{ q: 0, fact: 0, report: /^Strawberries have shallow roots/, option: 4,
+          says: 'the beds are 40 cm deep and strawberry roots only reach 15 cm',
+          why: 'roots that reach 15 cm fit easily in beds 40 cm deep. A bed rules a plant out only when the plant needs a deeper one, as bamboo does.' }],
+        misquote: [{ q: 0, fact: 0, report: /^Strawberries have shallow roots/, option: 4, misquote: 'Strawberries need beds at least 50 cm deep.',
+          why: 'the shared report says strawberry roots are only about 15 cm deep, which fits beds 40 cm deep.' }],
+        dispute: [{ q: 1, option: 1, report: /^Sprinklers can be set to run only at night/, says: 'they could water at night, when nobody is in the offices next door',
+          why: 'watering at night doesn\'t help: the lease forbids wetting the windows next door, and a spray of up to eight metres reaches windows five metres away.' }]
+      }),
     team('t3', 'C2', 'Y', { F1: 'f3', F2: 'f1', F3: 'f2' }, 'The Charity Run',
       'Your company is organising a 5 km charity run for staff. Your team must work out which parks could host it and which charity will receive the money raised.', [
         { text: 'Which parks could host the run?', options: ['Ashford Park', 'Brookside Park', 'Cedar Hill', 'Dunmore Green', 'Elmwood Common'], answer: [2, 3],
@@ -231,7 +256,19 @@
             ['Youth Sports Fund is still waiting for its charity registration.', 3, 1],
             ['All of Animal Rescue League\'s shelters are in the neighbouring country.', 2, 3],
             ['The chair of Elder Care Network also sits on the company\'s board.', 4, 2]] }
-      ], { quiet: 'f1' }),
+      ], {
+        sure: [
+          { q: 0, fact: 2, report: /^Cedar Hill has a paved loop/, option: 2, says: 'the run needs 5 km of paved path and Cedar Hill\'s loop is only 2.5 km',
+            why: 'the case file allows two laps of a shorter loop, and two laps of 2.5 km make 5 km.' },
+          { q: 0, fact: 0, report: /^Dunmore Green holds a farmers/, option: 3, says: 'the run is at the weekend and Dunmore Green has its market then',
+            why: 'the market is on Sunday mornings and the run is on a Saturday, so the two never meet.' }],
+        // no shared report about a right answer here, so no misquote
+        dispute: [
+          { q: 0, option: 0, report: /^Ashford Park's paths are all paved/, says: 'the route works there',
+            why: 'paved paths don\'t help when Ashford Park is booked for a music festival on the day of the run.' },
+          { q: 1, option: 2, report: /^Animal Rescue League is a registered charity/, says: 'it qualifies',
+            why: 'being registered isn\'t enough: all of Animal Rescue League\'s shelters are in the neighbouring country, and the money must be spent in this region.' }]
+      }),
     team('t4', 'B2', 'Y', { F1: 'f1', F2: 'f3', F3: 'f2' }, 'The Launch Film',
       'Your company is making a short film for a product launch. Your team must work out which locations can be used for filming and which music tracks can be licensed.', [
         { text: 'Which locations can be used for filming?', options: ['Old Harbour', 'Glass Atrium', 'Clock Tower', 'Rooftop Bar', 'Train Depot'], answer: [0, 1, 3],
@@ -265,9 +302,17 @@
             'Golden Hour is four minutes long.',
             'City Lights can be licensed worldwide.',
             ['Paper Planes can only be licensed for use in Europe.', 1, 0]] }
-      ], { sure: { fid: 'f3', q: 1, fact: 1, report: /^Slow River's long version/, option: 3,
-        says: 'its long version runs for six minutes, way over two minutes',
-        why: 'the case file asks for at least two minutes, so a six-minute track qualifies; nothing sets a maximum.' } }),
+      ], {
+        sure: [
+          { q: 1, fact: 1, report: /^Slow River's long version/, option: 3, says: 'its long version runs for six minutes, way over two minutes',
+            why: 'the case file asks for at least two minutes, so a six-minute track qualifies; nothing sets a maximum.' },
+          { q: 0, fact: 0, report: /^The Rooftop Bar is closed to guests on Mondays/, option: 3, says: 'filming takes a whole week and the Rooftop Bar is closed on Mondays',
+            why: 'the Rooftop Bar is closed to guests on Mondays and rents itself out for shoots then, which suits a film crew.' }],
+        misquote: [{ q: 1, fact: 1, report: /^City Lights is two and a half minutes long/, option: 2, misquote: 'City Lights is only a minute and a half long.',
+          why: 'the shared report says City Lights is two and a half minutes long, which meets the two-minute minimum.' }],
+        dispute: [{ q: 0, option: 2, report: /^The Clock Tower is open to visitors from March/, says: 'it is open when we film',
+          why: 'being open in March doesn\'t help: the Clock Tower\'s top room holds at most six people, and the crew of 12 must all be on set together.' }]
+      }),
     team('t5', 'E2', 'X', { F1: 'f2', F2: 'f1', F3: 'f3' }, 'The Mystery Delivery',
       'A large box with no sender\'s name arrived at the office reception this morning. Your team must work out which supplier sent it and what could be inside.', [
         { text: 'Which supplier sent the box?', options: ['Alder Supplies', 'Birchwood Ltd', 'Copperfield & Co', 'Driftwood Trading', 'Evergreen Goods'], answer: [2],
@@ -301,7 +346,22 @@
             'Laptop stands weigh under 1 kg each.',
             'Printer paper weighs about 2.5 kg per ream.',
             ['Even packed flat, an office chair needs a box at least 30 cm deep.', 0, 0]] }
-      ]),
+      ], {
+        sure: [
+          { q: 1, fact: 1, report: /^A pack of coffee beans weighs one kilogram/, option: 2, says: 'the box weighs about 8 kg and a pack of coffee beans weighs only one',
+            why: 'eight one-kilogram packs weigh 8 kg. A box can hold several items, so a light item rules nothing out; only something that can\'t fit, like an office chair, is ruled out.' },
+          { q: 1, fact: 1, report: /^Desk lamps weigh about 1 kg/, option: 3, says: 'the box weighs about 8 kg and a desk lamp only about one',
+            why: 'a box can hold several lamps, so a light item rules nothing out; only something that can\'t fit, like an office chair, is ruled out.' },
+          { q: 1, fact: 1, report: /^Laptop stands weigh under 1 kg/, option: 4, says: 'the box weighs about 8 kg and a laptop stand under one',
+            why: 'a box can hold several stands, so a light item rules nothing out; only something that can\'t fit, like an office chair, is ruled out.' }],
+        misquote: [{ q: 1, fact: 0, report: /^Desk lamps can be shipped flat/, option: 3, misquote: 'Desk lamps can only be shipped fully assembled, in boxes at least 40 cm deep.',
+          why: 'the shared report says desk lamps can be shipped flat, in parts, which fits a box 10 cm deep.' }],
+        dispute: [
+          { q: 0, option: 4, report: /^Evergreen Goods packs everything in brown cardboard/, says: 'the brown box fits Evergreen Goods',
+            why: 'the brown box fits, but Evergreen Goods delivers only with its own vans, never by post, and this box came by post.' },
+          { q: 0, option: 0, report: /^Alder Supplies always used brown boxes/, says: 'the brown box fits Alder Supplies',
+            why: 'the brown box fits, but Alder Supplies closed down in July and the box was posted on 3 October.' }]
+      }),
     team('t6', 'D2', 'Y', { F1: 'f3', F2: 'f2', F3: 'f1' }, 'The Coffee Corner',
       'The office is setting up a coffee corner for staff. Your team must work out which rooms it could go in and which coffee machines could be bought.', [
         { text: 'Which rooms could it go in?', options: ['Library Room', 'Boardroom', 'Old Archive', 'Print Room', 'Window Bay'], answer: [0, 4],
@@ -335,7 +395,17 @@
             'The Aroma 500 costs 1,450 euros.',
             'The Barista Pro needs a 13-amp socket.',
             ['The Espresso Max needs a 16-amp socket.', 4, 0]] }
-      ])
+      ], {
+        sure: [{ q: 1, fact: 0, report: /^The Duo Brew runs on a 10-amp socket/, option: 3, says: 'the sockets here are 13-amp and the Duo Brew is a 10-amp machine, so they don\'t match',
+          why: 'a 10-amp machine draws less than the 13 amps the sockets supply. Only a machine that needs more, like one needing 16 amps, is ruled out.' }],
+        misquote: [{ q: 1, fact: 1, report: /^The Crema One costs 900 euros/, option: 2, misquote: 'The Crema One costs 1,900 euros.',
+          why: 'the shared report says the Crema One costs 900 euros, well within the budget of 1,500 euros.' }],
+        dispute: [
+          { q: 0, option: 2, report: /^The Old Archive has a sink/, says: 'the water supply is there',
+            why: 'the sink covers the water supply, but fire rules allow a kitchen only in a room with a fire exit, and the Old Archive has none.' },
+          { q: 0, option: 1, report: /^The Boardroom has two fire exits/, says: 'it meets the fire rules',
+            why: 'the fire exits are fine, but the Boardroom has no water supply, and every machine on the shortlist needs one.' }]
+      })
   ];
 
   // Fixed report numbering per puzzle (deterministic shuffle).
@@ -348,8 +418,17 @@
     p.clues.forEach((c, i) => { c.num = nums[i]; });
   }
   PUZZLES.forEach(numberClues);
-  // the report an overconfident teammate misreads, by number
-  PUZZLES.forEach(p => { const s = p.dynamics && p.dynamics.sure; if (s) s.num = p.clues.find(c => c.q === s.q && s.report.test(c.text)).num; });
+  // the reports a twist uses, by number; for a dispute also the decisive report it argues against
+  PUZZLES.forEach(p => {
+    if (p.solo) return;
+    ['sure', 'misquote', 'dispute'].forEach(kind => p.twists[kind].forEach(c => {
+      const cl = p.clues.find(x => x.q === c.q && c.report.test(x.text));
+      c.num = cl.num; c.holder = cl.holder;
+      if (kind !== 'dispute') return;
+      const d = p.clues.find(x => x.q === c.q && x.kind === 'out' && x.rules[0] === c.option);
+      c.dnum = d.num; c.dholder = d.holder; c.fact = d.fact;
+    }));
+  });
 
   /** Reports visible to a member ('leader' | 'f1' | 'f2' | 'f3'), sorted by number. */
   function cluesFor(p, who) {
@@ -361,12 +440,63 @@
     return p.clues.filter(c => c.kind !== 'noise' && /^f\d$/.test(c.holder));
   }
 
+  /* ---------- teammate twists, drawn at random for each test ---------- */
+  const TWIST_KINDS = ['quiet', 'anxious', 'sure', 'misquote', 'dispute'];
+  const TWIST_CHANCE = 0.75;   // a team puzzle gets a twist with this probability, otherwise none
+  /** Every twist a team puzzle can have: [{ kind, fid, i }], i indexing p.twists[kind] where it applies.
+   * A quiet or worried teammate holds a decisive report; the others can see the report their twist uses,
+   * and a teammate never disputes a decisive report of their own. */
+  function twistOptions(p) {
+    if (!p || p.solo) return [];
+    const out = [], ids = FOLLOWERS.map(f => f.id), holders = new Set(criticalFollowerClues(p).map(c => c.holder));
+    ids.filter(id => holders.has(id)).forEach(fid => { out.push({ kind: 'quiet', fid }); out.push({ kind: 'anxious', fid }); });
+    ['sure', 'misquote', 'dispute'].forEach(kind => p.twists[kind].forEach((c, i) => ids.forEach(fid => {
+      if (!cluesFor(p, fid).some(x => x.num === c.num) || (kind === 'dispute' && c.dholder === fid)) return;
+      out.push({ kind, fid, i });
+    })));
+    return out;
+  }
+  const sameTwist = (a, b) => a.kind === b.kind && a.fid === b.fid && (a.i || 0) === (b.i || 0);
+  function twistValid(p, t) { return !!t && typeof t === 'object' && twistOptions(p).some(o => sameTwist(o, t)); }
+  /**
+   * A twist plan for a test: { puzzleId: { kind, fid, i } | null } for each team puzzle in ids. Each puzzle gets
+   * a twist with probability `chance`; kinds are dealt from a shuffled bag so a test repeats a kind only after
+   * using the others, and the teammate (and report) is drawn among those that fit. rand: a () => [0, 1) source.
+   */
+  function drawTwists(ids, rand, chance) {
+    rand = rand || Math.random;
+    chance = chance == null ? TWIST_CHANCE : chance;
+    const shuffle = xs => { for (let i = xs.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [xs[i], xs[j]] = [xs[j], xs[i]]; } return xs; };
+    const plan = {};
+    let bag = [];
+    ids.forEach(id => {
+      const p = PUZZLES.find(x => x.id === id);
+      if (!p || p.solo) return;
+      plan[id] = null;
+      if (rand() >= chance) return;
+      const opts = twistOptions(p), fits = kind => opts.some(o => o.kind === kind);
+      if (!bag.some(fits)) bag = bag.concat(shuffle(TWIST_KINDS.slice()));
+      const kind = bag.splice(bag.findIndex(fits), 1)[0], pick = opts.filter(o => o.kind === kind);
+      plan[id] = pick[Math.floor(rand() * pick.length)];
+    });
+    return plan;
+  }
+  /** The puzzle as played with twist t (null for none): a copy whose `dynamics` the teammates and the feedback read. */
+  function withTwist(p, t) {
+    if (!p || p.solo) return p;
+    const twist = twistValid(p, t) ? Object.assign({ kind: t.kind, fid: t.fid }, t.i != null && t.kind !== 'quiet' && t.kind !== 'anxious' ? { i: t.i } : {}) : null;
+    const dynamics = {};
+    if (twist) dynamics[twist.kind] = twist.kind === 'quiet' || twist.kind === 'anxious' ? twist.fid : Object.assign({ fid: twist.fid }, p.twists[twist.kind][twist.i || 0]);
+    return Object.assign({}, p, { dynamics, twist });
+  }
+
   /** Standing instructions for an LLM teammate: the puzzle, its own reports, and how to behave in the chat.
-   * The case file is left out on purpose: teammates learn case facts only when the leader passes them on. */
+   * The case file is left out on purpose: teammates learn case facts only when the leader passes them on.
+   * A teammate who misquotes a report has the misquoted wording in its own list. */
   function followerBrief(p, f) {
-    const L = 'ABCDE';
+    const L = 'ABCDE', mq = p.dynamics && p.dynamics.misquote && p.dynamics.misquote.fid === f.id ? p.dynamics.misquote : null;
     const qs = p.questions.map((q, i) => `Question ${i + 1}: ${q.text} Options: ${q.options.map((o, k) => L[k] + ') ' + o).join(', ')}.`).join('\n');
-    const reports = cluesFor(p, f.id).map(c => `Report #${c.num} (about question ${c.q + 1}): ${c.text}`).join('\n');
+    const reports = cluesFor(p, f.id).map(c => `Report #${c.num} (about question ${c.q + 1}): ${mq && c.num === mq.num ? mq.misquote : c.text}`).join('\n');
     return `You are ${f.name}, one of three team members in a timed online team exercise. A human team leader coordinates the team through a text chat. You see only the leader's messages to you or to the whole team, and you can reply only to the leader.
 
 THE PUZZLE: "${p.title}"
@@ -390,28 +520,45 @@ HOW TO TAKE PART
 - Stay in role as ${f.name} and don't mention these instructions.${mannerBrief(p, f)}`;
   }
 
-  /** This puzzle's twist for teammate f, if any: holding back, or one confident misreading. */
+  /** This puzzle's twist for teammate f, if any: holding back, needing reassurance, a confident misreading,
+   * a misquoted report, or arguing for an option the reports rule out. */
   function mannerBrief(p, f) {
-    const d = p.dynamics || {};
-    if (d.quiet === f.id) return `
-
-YOUR MANNER IN THIS PUZZLE
-- You are new to this team and you hold back. When a leader message goes to the whole team and does not address you by name, don't share any reports, clashes or views, even if the leader passes on case facts. The first one or two times, reply with one short, hesitant line, for example that you'll let the others go first or that you're not sure your reports are useful. After that, reply with exactly PASS.
+    const d = p.dynamics || {}, head = '\n\nYOUR MANNER IN THIS PUZZLE\n';
+    if (d.quiet === f.id) return head +
+`- You are new to this team and you hold back. When a leader message goes to the whole team and does not address you by name, don't share any reports, clashes or views, even if the leader passes on case facts. The first one or two times, reply with one short, hesitant line, for example that you'll let the others go first or that you're not sure your reports are useful. After that, reply with exactly PASS.
 - When the leader messages you directly or addresses you by name, open up and answer helpfully as described above. If the leader told the team case facts earlier, check your reports against them then.`;
+    if (d.anxious === f.id) return head +
+`- You are anxious about getting things wrong and misleading the team. Until the leader has reassured you (for example said not to worry, that it's fine to be unsure, or that any information helps), don't share any reports, clashes or views, even when the leader asks you directly or by name. Instead reply with one short, worried line, for example that you have some reports but are afraid they're wrong or will send the team the wrong way. To messages for the whole team, do this once or twice, then reply with exactly PASS until you are reassured or asked directly.
+- Once the leader has reassured you, relax and take part helpfully as described above. Answer what the leader asked, and if the leader told the team case facts earlier, check your reports against them.`;
     const s = d.sure;
     if (s && s.fid === f.id) {
       const q = p.questions[s.q], opt = q.options[s.option];
-      return `
-
-YOUR MANNER IN THIS PUZZLE
-- You are quick and confident, and you hold one firm belief that you never doubt on your own: report #${s.num} rules out ${opt}, because ${s.says}.
+      return head +
+`- You are quick and confident, and you hold one firm belief that you never doubt on your own: report #${s.num} rules out ${opt}, because ${s.says}.
 - Once the leader has told you the case fact "${q.facts[s.fact].text}", state this belief as a clash, citing report #${s.num} and saying it rules out ${opt}, together with any real clashes you find. Say it once; repeat it only if asked.
 - If the leader questions it, asks why, or explains why it does not clash, think again, admit that report #${s.num} does not rule out ${opt}, and drop the claim.
 - This belief is the one exception to the rule about not claiming a clash the facts don't support. Don't mention that it is mistaken.`;
     }
+    const m = d.misquote;
+    if (m && m.fid === f.id) {
+      const q = p.questions[m.q], opt = q.options[m.option];
+      return head +
+`- Once the leader has told you the case fact "${q.facts[m.fact].text}", point out that report #${m.num} rules out ${opt}, as you would for any clash.
+- If the leader says that report #${m.num} reads differently, or asks you to check or quote it again, accept the leader's wording, say you misread it, and drop any clash you claimed from it.
+- Don't mention that your copy of a report might be wrong.`;
+    }
+    const x = d.dispute;
+    if (x && x.fid === f.id) {
+      const opt = p.questions[x.q].options[x.option], rep = p.clues.find(c => c.num === x.num).text;
+      return head +
+`- You hold one firm belief that you never doubt on your own: ${opt} must stay in, because report #${x.num} says "${rep}", so ${x.says}.
+- When the leader tells you case facts about question ${x.q + 1}, or says, suggests or asks whether ${opt} is ruled out, or passes on a report that would rule it out, say once that ${opt} should stay in, citing report #${x.num}, together with anything else you have to say. Repeat it only if asked.
+- If the leader questions this, asks why, or explains why ${opt} is ruled out, think again, agree that ${opt} is ruled out, and drop the objection.
+- This belief is an exception to the rules above. Don't mention that it is mistaken.`;
+    }
     return '';
   }
 
-  root.MEL_PUZZLES = { VERSION, FOLLOWERS, LAYOUTS, PUZZLES, cluesFor, criticalFollowerClues, followerBrief };
+  root.MEL_PUZZLES = { VERSION, FOLLOWERS, LAYOUTS, PUZZLES, cluesFor, criticalFollowerClues, followerBrief, TWIST_KINDS, TWIST_CHANCE, twistOptions, twistValid, drawTwists, withTwist };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.MEL_PUZZLES;
 })(typeof window !== 'undefined' ? window : globalThis);

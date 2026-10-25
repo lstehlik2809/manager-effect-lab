@@ -82,11 +82,11 @@
 
   /**
    * Stream one teammate reply through the hosted proxy (no key in the browser). The proxy builds the
-   * teammate brief from the puzzle and teammate ids, so it can only play these teammates.
-   * Sent as text/plain so the browser needs no CORS preflight.
+   * teammate brief from the puzzle and teammate ids and the puzzle's twist ({ kind, fid, i } or null),
+   * so it can only play these teammates. Sent as text/plain so the browser needs no CORS preflight.
    */
-  async function hostedStream({ url, version, puzzle, follower, messages, signal, onText }) {
-    const res = await post(url, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ v: version, puzzle, follower, messages }) }, signal);
+  async function hostedStream({ url, version, puzzle, follower, twist, messages, signal, onText }) {
+    const res = await post(url, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ v: version, puzzle, follower, twist: twist || null, messages }) }, signal);
     if (!res.ok) throw await httpError(res);
     return readStream(res, signal, onText);
   }

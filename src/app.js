@@ -703,10 +703,10 @@
   const SCR = window.MEL_SCRIPTED, COACH = window.MEL_COACH;
   const FOL = PZ.FOLLOWERS;
   const folName = id => (FOL.find(f => f.id === id) || { name: 'You' }).name;
-  // Quick suits visitors from a LinkedIn post; Standard and Extended add solo warm-ups, which a group comparison needs.
-  // Extended is Study 2's full set: three solo puzzles and six team puzzles.
+  // Quick is a demo for visitors from a LinkedIn post: two puzzles are too few to measure anything. Standard and
+  // Extended add solo warm-ups, which a group comparison needs. Extended is Study 2's full set: three solo puzzles and six team puzzles.
   const LENGTHS = {
-    quick: { label: 'Quick', time: 'about 10–15 min', desc: '2 team puzzles', warmups: 0, team: ['t1', 't2'] },
+    quick: { label: 'Quick demo', time: 'about 10–15 min', desc: '2 team puzzles, a first taste', warmups: 0, team: ['t1', 't2'] },
     standard: { label: 'Standard', time: 'about 20–25 min', desc: '1 warm-up and 4 team puzzles', warmups: 1, team: ['t1', 't2', 't3', 't4'] },
     extended: { label: 'Extended', time: 'about 40–45 min', desc: '3 warm-ups and 6 team puzzles, as in the study', warmups: 3, team: null }
   };
@@ -718,7 +718,8 @@
   const AI = {
     sample: null, sampleState: inClaude ? 'checking' : 'absent',
     settings: Object.assign({ engine: inClaude ? 'claude' : HOSTED_URL ? 'hosted' : 'scripted', model: 'claude-opus-5-5', minutes: 6, name: '', remember: false, apiKey: '', geminiKey: '' }, store.get('ai.settings', {})),
-    phase: 'intro', order: [], idx: 0, results: [], cur: null, notice: '', survey: { fun: null, fair: null, comment: '', sent: false },
+    // twists: the teammate twist drawn for each team puzzle of this test (puzzles.js, drawTwists)
+    phase: 'intro', order: [], twists: {}, idx: 0, results: [], cur: null, notice: '', survey: { fun: null, fair: null, comment: '', sent: false },
     root: () => $('#ai-root')
   };
   if (!AI.settings.remember) { AI.settings.apiKey = ''; AI.settings.geminiKey = ''; }
@@ -815,13 +816,13 @@
     const startBtn = () => h('button', { class: 'btn' + (pending ? '' : ' primary') + ' start-btn', type: 'button', onclick: startTest }, `${pending ? 'Start a new test' : 'Start'} · ${len.time}`);
     const setup = h('div', { class: 'panel flow', id: 'ai-setup' }, h('h3', {}, 'Start'),
       h('div', { class: 'field' }, h('label', {}, 'Length'), h('div', { class: 'length-cards' }, Object.keys(LENGTHS).map(lengthCard)),
-        len.warmups ? '' : h('span', { class: 'hint' }, 'To compare a group of people fairly, choose Standard: its warm-up measures how each person reasons alone.')),
+        len.warmups ? '' : h('span', { class: 'hint' }, 'Quick is a demo: two puzzles show how the test works but are too few to say much about how you lead. For a fuller reading choose Standard or Extended; to compare a group fairly, too, since their warm-ups measure how each person reasons alone.')),
       h('div', { class: 'field' }, h('label', {}, 'Teammates'), engines),
       AI.notice ? h('p', { class: 'note warn', id: 'ai-notice' }, AI.notice) : '',
       h('div', { class: 'btn-row' },
         pending ? h('button', { class: 'btn primary', type: 'button', disabled: resumeWait || null, onclick: resumeTest }, resumeWait ? 'Checking Claude…' : 'Resume your test') : '',
         startBtn(),
-        last && !pending ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.order = last.order || last.results.map(r => r.id); AI.survey = last.survey || { fun: null, fair: null, comment: '', sent: false }; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''),
+        last && !pending ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.order = last.order || last.results.map(r => r.id); AI.twists = last.twists || {}; AI.survey = last.survey || { fun: null, fair: null, comment: '', sent: false }; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''),
       h('p', { class: 'small muted' }, free ? 'No sign-up and no key. ' : '', pending ? 'You have an unfinished test saved in this browser. Starting a new test replaces it.' : 'You can stop after any team puzzle and still get your result. If you leave mid-test, your progress is saved in this browser and you can resume.'),
       more);
     put(root,
@@ -836,10 +837,10 @@
         setup,
         h('div', { class: 'panel prose' }, h('h3', {}, 'How it works'),
           h('ol', {},
-            h('li', {}, h('strong', {}, 'Lead the team. '), 'In each team puzzle you hold the case file and 8 reports; each teammate holds 8 more, half of them shared. Only you see the case file, so on their own your teammates can\'t tell which of their reports matter. Message everyone or one person. Teammates only talk to you, and like real teammates they differ: some hold back, some are surer than they should be.'),
+            h('li', {}, h('strong', {}, 'Lead the team. '), 'In each team puzzle you hold the case file and 8 reports; each teammate holds 8 more, half of them shared. Only you see the case file, so on their own your teammates can\'t tell which of their reports matter. Message everyone or one person. Teammates only talk to you.'),
             h('li', {}, h('strong', {}, 'Answer with probabilities. '), 'Each puzzle has two questions with five options. Each report is a fact about one option, and it rules that option out when it clashes with the case file; the options left standing are equally likely. Spread 100 points across them.'),
             h('li', {}, h('strong', {}, 'Get feedback on what you did. '), 'After each puzzle: which questions drew out decisive reports, which reports stayed hidden and who held them, and where your points went.'),
-            h('li', {}, h('strong', {}, 'See how you led. '), 'Your score, the leadership habits the study linked to better team results, a playful leadership style, and a result card to share.')),
+            h('li', {}, h('strong', {}, 'See how you led. '), 'Your leading score, which counts only the points lost in leading the team, your total score, the leadership habits the study linked to better team results, a playful leadership style, and a result card to share.')),
           h('p', { class: 'small muted' }, 'Standard and Extended start with solo warm-ups, where you see every report; they show how you reason on your own. Scores run from 0 to 100 (100 = exactly the right distribution; an even split scores 20–80). Your results stay in your browser unless you choose to send them at the end, without your name or chat. The page counts anonymously how many tests are started and finished, with no chat and no personal data. AI teammates receive only your chat messages; scripted teammates run entirely in your browser.'))),
       h('details', { class: 'panel', id: 'ai-group-wrap', open: AI.group.leaders.length ? true : null },
         h('summary', { class: 'group-summary' }, h('strong', {}, 'For teams and researchers: compare a group of test takers')),
@@ -946,7 +947,7 @@
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Enjoyment'), h('span', { class: 'value' }, rating(P.fun)), h('span', { class: 'sub' }, `${P.fun.n} rated`)),
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Fair feedback'), h('span', { class: 'value' }, rating(P.fair)), h('span', { class: 'sub' }, `${P.fair.n} rated`)),
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Team score'), h('span', { class: 'value' }, isFinite(P.median) ? Math.round(P.median) : '–'), h('span', { class: 'sub' }, isFinite(P.median) ? `median · middle half ${Math.round(P.q1)}–${Math.round(P.q3)} · range ${Math.round(P.min)}–${Math.round(P.max)}` : '')),
-      P.twists.total ? h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Teammate twists handled'), h('span', { class: 'value' }, `${P.twists.met} of ${P.twists.total}`), h('span', { class: 'sub' }, 'quiet teammates drawn out, wrong claims questioned')) : '');
+      P.twists.total ? h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Teammate twists handled'), h('span', { class: 'value' }, `${P.twists.met} of ${P.twists.total}`), h('span', { class: 'sub' }, 'teammates who made it harder, handled in full')) : '');
     const hist = h('div', { role: 'img', 'aria-label': 'Team scores of ' + P.scored + ' people in bands of 10 points: ' + P.bins.map(b => `${b.lo}–${b.hi}: ${b.n}`).join(', ') },
       h('div', { class: 'pilot-hist' }, P.bins.map(b => h('div', { class: 'bin' }, b.n ? String(b.n) : '', h('i', { style: { height: Math.round(72 * b.n / big) + 'px' } })))),
       h('div', { class: 'pilot-hist-axis', 'aria-hidden': 'true' }, P.bins.map(b => h('span', {}, b.lo === 90 ? '90+' : String(b.lo)))));
@@ -990,7 +991,7 @@
     const c = AI.phase === 'puzzle' ? AI.cur : null;
     if (c && c.paused) return;
     store.set('ai.progress', {
-      v: PZ.VERSION, savedAt: Date.now(), order: AI.order, idx: AI.idx, phase: AI.phase, results: AI.results,
+      v: PZ.VERSION, savedAt: Date.now(), order: AI.order, twists: AI.twists, idx: AI.idx, phase: AI.phase, results: AI.results,
       // the clock stops while the player is away: only the time used so far is kept
       cur: c && { id: c.puzzle.id, used: Date.now() - c.startedAt, mins: c.mins, locked: c.locked, messages: c.messages, seq: c.seq, to: c.to, draft: c.draft,
         answers: c.answers, out: c.out, engine: c.engine, shared: Object.fromEntries(FOL.map(f => [f.id, [...c.followers[f.id].shared]])),
@@ -1020,9 +1021,9 @@
     const pr = loadProgress();
     if (!pr) { renderIntro(); return; }
     AI.notice = '';
-    AI.order = pr.order; AI.idx = pr.idx; AI.results = pr.results || [];
+    AI.order = pr.order; AI.twists = pr.twists || {}; AI.idx = pr.idx; AI.results = pr.results || [];
     if (pr.phase === 'feedback') { AI.phase = 'feedback'; AI.render(); window.scrollTo(0, 0); return; }
-    const s = pr.cur, p = PZ.PUZZLES.find(x => x.id === s.id), startedAt = Date.now() - (+s.used || 0);
+    const s = pr.cur, p = PZ.withTwist(PZ.PUZZLES.find(x => x.id === s.id), AI.twists[s.id]), startedAt = Date.now() - (+s.used || 0);
     let engine = s.engine, note = '';
     if (!engineReady(engine)) {
       engine = engineReady('hosted') ? 'hosted' : 'scripted';
@@ -1086,13 +1087,15 @@
     if (AI.notice) { const n = $('#ai-notice'); if (n) n.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
     const L = LENGTHS[st.length] || LENGTHS.quick;
     AI.order = PZ.PUZZLES.filter(p => p.solo).slice(0, L.warmups).concat(PZ.PUZZLES.filter(p => !p.solo && (!L.team || L.team.includes(p.id)))).map(p => p.id);
+    // which teammate makes which puzzle harder, and how, is drawn afresh for every test
+    AI.twists = PZ.drawTwists(AI.order, Math.random);
     AI.idx = 0; AI.results = []; AI.survey = { fun: null, fair: null, comment: '', sent: false };
     pilotEvent({ kind: 'start', length: st.length, engine: st.engine });
     startPuzzle();
   }
 
   function startPuzzle() {
-    const p = PZ.PUZZLES.find(x => x.id === AI.order[AI.idx]);
+    const p = PZ.withTwist(PZ.PUZZLES.find(x => x.id === AI.order[AI.idx]), AI.twists[AI.order[AI.idx]]);
     const mins = p.solo ? (AI.settings.minutes ? 4 : 0) : AI.settings.minutes;
     AI.cur = {
       puzzle: p, startedAt: Date.now(), mins, deadline: mins ? Date.now() + mins * 60000 : null, locked: false,
@@ -1287,7 +1290,7 @@
       return LLM.geminiStream({ apiKey: AI.settings.geminiKey, model: LLM.GEMINI_MODEL, system, messages: turns, signal, onText: t => onText(cleanReply(t, fid)) }).then(r => r.text);
     }
     if (c.engine === 'hosted') {
-      return LLM.hostedStream({ url: HOSTED_URL, version: PZ.VERSION, puzzle: c.puzzle.id, follower: fid, messages: turns, signal, onText: t => onText(cleanReply(t, fid)) }).then(r => r.text);
+      return LLM.hostedStream({ url: HOSTED_URL, version: PZ.VERSION, puzzle: c.puzzle.id, follower: fid, twist: c.puzzle.twist, messages: turns, signal, onText: t => onText(cleanReply(t, fid)) }).then(r => r.text);
     }
     if (c.engine === 'claude') {
       const input = [{ role: 'user', content: system + `\n\nThe chat follows. Reply with ${f.name}'s next chat message only.` }].concat(turns);
@@ -1453,7 +1456,7 @@
     const flat = p.questions.map(q => S.credenceScore([20, 20, 20, 20, 20], S.correctDist(q.answer, 5)));
     const timeLeft = c.deadline ? Math.max(0, (c.deadline - Date.now()) / 1000) : null;
     const analysis = COACH.analyse(p, c.messages, c.answers, { timeLeft });
-    AI.results.push({ id: p.id, version: PZ.VERSION, title: p.title, solo: !!p.solo, scores, flat, answers: c.answers.map(a => a.slice()), seconds: elapsed(), metrics: p.solo ? null : analysis.metrics, analysis, transcript: c.messages.slice(), engine: c.engine, model: c.engine === 'api' ? AI.settings.model : (c.engine === 'gemini' || c.engine === 'hosted') ? LLM.GEMINI_MODEL : null });
+    AI.results.push({ id: p.id, version: PZ.VERSION, title: p.title, solo: !!p.solo, twist: p.twist || null, scores, flat, answers: c.answers.map(a => a.slice()), seconds: elapsed(), metrics: p.solo ? null : analysis.metrics, analysis, transcript: c.messages.slice(), engine: c.engine, model: c.engine === 'api' ? AI.settings.model : (c.engine === 'gemini' || c.engine === 'hosted') ? LLM.GEMINI_MODEL : null });
     if (!p.solo) pilotEvent({ kind: 'puzzle', puzzle: p.id, engine: c.engine });
     AI.phase = 'feedback';
     saveProgress();
@@ -1465,15 +1468,17 @@
     if (r.analysis || r.version !== PZ.VERSION) return r;
     const p = PZ.PUZZLES.find(x => x.id === r.id);
     if (!p) return r;
-    r.analysis = COACH.analyse(p, r.transcript || [], r.answers);
+    r.analysis = COACH.analyse(PZ.withTwist(p, r.twist), r.transcript || [], r.answers);
     if (!r.solo) r.metrics = Object.assign({}, r.metrics, r.analysis.metrics);
     return r;
   }
 
-  /** Stacked bar: the score, points lost in using the reports, points lost to reports that stayed hidden. */
+  /** Stacked bar: the score, points lost in reasoning (using the reports you had), and points lost in leading
+   * (reports that stayed hidden, and a teammate's wrong claim taken on board). */
   function pointsSplit(info, solo) {
-    const sc = Math.round(info.actual), use = Math.round(info.use), hid = Math.max(0, 100 - sc - use);
-    const segs = solo ? [['score', sc, 'Your score'], ['use', 100 - sc, 'lost in reasoning']] : [['score', sc, 'Your score'], ['use', use, 'lost in using the reports you had'], ['hidden', hid, 'lost to reports that stayed hidden']];
+    const tw = info.twist || 0, sc = Math.round(info.actual), use = Math.round(Math.max(0, info.use - tw)), lead = Math.max(0, 100 - sc - use);
+    const segs = solo ? [['score', sc, 'Your score'], ['use', 100 - sc, 'lost in reasoning']]
+      : [['score', sc, 'Your score'], ['use', use, 'lost in reasoning: using the reports you had'], ['hidden', lead, 'lost in leading: reports that stayed hidden' + (tw >= 0.5 ? ' or a wrong claim you accepted' : '')]];
     return h('div', { class: 'split' },
       h('div', { class: 'split-bar', role: 'img', 'aria-label': segs.map(([, v, l]) => l === 'Your score' ? `Score ${v}` : `${v} points ${l}`).join('; ') },
         segs.map(([k, v]) => h('div', { class: 'seg-' + k, style: { width: v + '%' } }))),
@@ -1517,7 +1522,8 @@
       pointsSplit(A.info),
       obsLists(obs.good, obs.tips),
       h('div', { class: 'stats' },
-        h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Hidden reports surfaced'), h('span', { class: 'value' }, `${m.surfaced} of ${m.critical}`), h('span', { class: 'sub' }, 'decisive reports your teammates passed on')),
+        h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Leading score'), h('span', { class: 'value' }, Math.round(A.info.lead), h('span', { class: 'small muted' }, ' / 100')), h('span', { class: 'sub' }, 'your score without the points lost in reasoning')),
+        h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Hidden reports surfaced'), h('span', { class: 'value' }, `${m.surfaced} of ${m.critical}`), h('span', { class: 'sub' }, 'decisive reports your teammates passed on')),
         h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Questions'), h('span', { class: 'value' }, m.questions), h('span', { class: 'sub' }, `${m.targeted} specific · ${m.generic} general · ${m.repeats} repeated`)),
         h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Follow-ups'), h('span', { class: 'value' }, m.followUps), h('span', { class: 'sub' }, `built on a teammate's answer` + (m.connects ? ` · ${m.connects} passed on to others` : ''))),
         h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Asked directly'), h('span', { class: 'value' }, `${m.askedDirect.length} of 3`), h('span', { class: 'sub' }, m.askedDirect.length ? m.askedDirect.map(folName).join(', ') : 'only messages to everyone')),
@@ -1547,7 +1553,7 @@
   }
 
   // the last finished test, with its puzzle order (how far the player got) and their pilot ratings
-  const saveLast = () => store.set('ai.last', { results: AI.results, order: AI.order, survey: AI.survey, name: AI.settings.name, when: new Date().toISOString() });
+  const saveLast = () => store.set('ai.last', { results: AI.results, order: AI.order, twists: AI.twists, survey: AI.survey, name: AI.settings.name, when: new Date().toISOString() });
 
   function summaryNumbers(results) {
     results.forEach(ensureAnalysis);
@@ -1569,9 +1575,12 @@
   const RATING = { strong: 'Strong', efficient: 'Efficient', some: 'Some', little: 'Little' };
   const goodRating = r => r === 'strong' || r === 'efficient';
   function shareText(N, style) {
-    return `I just led a team of AI agents through ${N.team.length} hidden-profile puzzles: team score ${Math.round(N.teamScore)}/100, ${N.surfaced} of ${N.critical} hidden clues surfaced, leadership style "${style.name}". ` +
+    return `I just led a team of AI agents through ${N.demo ? 'the quick demo of a leadership test, ' : ''}${N.team.length} hidden-profile puzzles: leading score ${Math.round(N.lead)}/100 (team score ${Math.round(N.teamScore)}), ${N.surfaced} of ${N.critical} hidden clues surfaced, leadership style "${style.name}". ` +
       `It's a playful test inspired by Weidmann, Xu & Deming's research on measuring leadership with AI agents. Try it: ${APP_URL}`;
   }
+  // the puzzle order a result came from, and whether it was the Quick demo
+  const orderOf = R => (AI.order.length ? AI.order : R.map(r => r.id));
+  const isDemo = R => lengthOf(orderOf(R)) === 'quick';
   async function drawCard(N, hb, style, name) {
     const W = 1200, H = 627, c = document.createElement('canvas');
     c.width = W; c.height = H;
@@ -1582,16 +1591,17 @@
     g.fillStyle = '#eef2f1'; g.fillRect(0, 0, W, H);
     g.fillStyle = '#ffffff'; g.fillRect(36, 36, W - 72, H - 72);
     g.fillStyle = accent; g.fillRect(36, 36, 12, H - 72);
-    g.fillStyle = ink2; g.font = body('600 20px'); g.fillText('MANAGER EFFECT LAB  ·  LEADERSHIP TEST', 88, 96);
+    g.fillStyle = ink2; g.font = body('600 20px'); g.fillText('MANAGER EFFECT LAB  ·  LEADERSHIP TEST' + (N.demo ? '  ·  QUICK DEMO' : ''), 88, 96);
     const title = (name ? name + ' led' : 'I led') + ' a team of AI agents';
     let ts = 46;
     g.font = display(`700 ${ts}px`);
     while (g.measureText(title).width > W - 176 && ts > 20) { ts -= 2; g.font = display(`700 ${ts}px`); }
     g.fillStyle = ink; g.fillText(title, 88, 152);
-    const score = String(Math.round(N.teamScore));
+    const score = String(Math.round(N.lead));
     g.fillStyle = accent; g.font = display('700 140px'); g.fillText(score, 84, 318);
     const sw = g.measureText(score).width;
-    g.fillStyle = ink2; g.font = body('500 26px'); g.fillText('/ 100', 96 + sw, 278); g.fillText('team score', 96 + sw, 314);
+    g.fillStyle = ink2; g.font = body('500 26px'); g.fillText('/ 100', 96 + sw, 262); g.fillText('leading score', 96 + sw, 296);
+    g.font = body('400 20px'); g.fillText(`team score ${Math.round(N.teamScore)}`, 96 + sw, 326);
     g.fillStyle = ink2; g.font = body('600 20px'); g.fillText('LEADERSHIP STYLE (FOR FUN)', 640, 222);
     g.fillStyle = ink; g.font = display('700 50px'); g.fillText(style.name, 640, 282);
     g.strokeStyle = rule; g.lineWidth = 2; g.beginPath(); g.moveTo(88, 350); g.lineTo(W - 88, 350); g.stroke();
@@ -1625,13 +1635,14 @@
 
   function renderSummary() {
     const R = AI.results, root = AI.root(), N = summaryNumbers(R), name = (AI.settings.name || '').trim();
+    N.demo = isDemo(R);
     const cell = (r, f) => h('td', { class: 'num' }, r.metrics && r.metrics[f] != null ? r.metrics[f] : '–');
     const rows = R.map(r => h('tr', {},
       h('td', {}, r.title + (r.solo ? ' (solo)' : '')), h('td', { class: 'num' }, Math.round(r.scores[0])), h('td', { class: 'num' }, Math.round(r.scores[1])),
       h('td', { class: 'num' }, r.metrics ? `${r.metrics.surfaced}/${r.metrics.critical}` : '–'), cell(r, 'questions'), cell(r, 'targeted'), cell(r, 'repeats'), cell(r, 'followUps'),
       cell(r, 'turns'), cell(r, 'words'),
       h('td', { class: 'num' }, Math.floor(r.seconds / 60) + ':' + String(r.seconds % 60).padStart(2, '0'))));
-    const head = h('div', { class: 'section-head' }, h('div', { class: 'eyebrow' }, 'Your result' + (name ? ' · ' + name : '')), h('h2', {}, 'How you led your AI team'));
+    const head = h('div', { class: 'section-head' }, h('div', { class: 'eyebrow' }, (N.demo ? 'Your Quick demo result' : 'Your result') + (name ? ' · ' + name : '')), h('h2', {}, 'How you led your AI team'));
     const again = h('button', { class: 'btn quiet', type: 'button', onclick: () => { AI.phase = 'intro'; AI.render(); } }, 'Take the test again');
     if (!N.team.length) { put(root, head, h('div', { class: 'panel' }, h('p', {}, 'Complete the team puzzles to see a result.'), again)); return; }
     const hb = COACH.habits(N), style = COACH.leaderStyle(hb, N);
@@ -1644,19 +1655,23 @@
     const text = shareText(N, style);
     put(root, head,
       h('div', { class: 'panel flow' },
+        N.demo ? h('div', { class: 'note' }, h('p', { style: { margin: 0 } }, h('strong', {}, 'This was the Quick demo. '), 'Two puzzles show how the test works, but they are too few to say much about how you lead: one teammate\'s behaviour or one lucky guess can swing the result. For a fuller reading, take Standard (four team puzzles) or Extended (the study\'s six).'),
+          h('div', { class: 'btn-row', style: { marginTop: '10px' } }, h('button', { class: 'btn', type: 'button', onclick: () => { AI.settings.length = 'standard'; saveSettings(); AI.phase = 'intro'; AI.render(); window.scrollTo(0, 0); } }, 'Set up the Standard test'))) : '',
         h('div', { class: 'result-hero' },
-          h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Team-puzzle score'), h('span', { class: 'value big' }, Math.round(N.teamScore), h('span', { class: 'small muted' }, ' / 100')), h('span', { class: 'sub' }, `mean of ${N.nq} questions` + (range ? ' · ' + range : ''))),
+          h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Leading score'), h('span', { class: 'value big' }, Math.round(N.lead), h('span', { class: 'small muted' }, ' / 100')),
+            h('span', { class: 'sub' }, `points kept in leading the team · team score ${Math.round(N.teamScore)}` + (range ? ' (' + range + ')' : '') + `, mean of ${N.nq} questions`)),
           h('div', { class: 'style-box' }, h('span', { class: 'eyebrow' }, 'Your leadership style · for fun'), h('h3', {}, style.name), h('p', {}, style.text))),
+        h('p', { class: 'small muted' }, 'The leading score is 100 minus the points you lost in leading: reports your teammates held that never reached you, and wrong claims from teammates that you took on board. It leaves out the points lost in reasoning with the reports you had, so it is closer to what the study calls leadership than the team score, which mixes both.'),
         h('h3', {}, 'What you did, specifically'),
         obsLists(N.strengths, N.tips, 'What you did well', 'Try next time'),
         N.challenges.length ? [h('h3', {}, 'Teammates who made it harder'),
-          h('ul', { class: 'twists' }, N.challenges.map(c => h('li', {}, h('span', { class: 'pill' + (c.met ? ' pos' : c.kept ? '' : ' neg') }, h('span', { class: 'dot' }), c.met ? 'Handled' : c.kept ? 'Partly' : 'Missed'), h('span', {}, h('span', { class: 'obs-where' }, c.puzzle + ': '), twistText(c))))),
-          h('p', { class: 'small muted' }, 'As in real teams, some teammates hold back and some are surer than they should be. Drawing out a quiet teammate and checking a confident claim are leadership moves too, beyond asking the right questions.')] : '',
+          h('ul', { class: 'twists' }, N.challenges.map(c => { const st = twistState(c); return h('li', {}, h('span', { class: 'pill' + (st === 'met' ? ' pos' : st === 'partly' ? '' : ' neg') }, h('span', { class: 'dot' }), st === 'met' ? 'Handled' : st === 'partly' ? 'Partly' : 'Missed'), h('span', {}, h('span', { class: 'obs-where' }, c.puzzle + ': '), twistText(c))); })),
+          h('p', { class: 'small muted' }, 'As in real teams, teammates differ. Each test draws afresh which teammate, if any, makes a puzzle harder and how. Drawing out a quiet or worried teammate, checking a confident claim or a quote, and settling a disagreement on the evidence are leadership moves too, beyond asking the right questions.')] : '',
         h('h3', {}, 'Where your points went'),
-        pointsSplit({ actual: N.teamScore, use: N.use, hidden: N.hidden }),
-        h('p', { class: 'small muted' }, 'Points lost to reports that stayed hidden reflect leading: drawing out what your teammates knew. Points lost in using the reports you had reflect reasoning. A report counts as drawn out only when a teammate cited its number, so the hidden part can be overstated if teammates paraphrased.'),
+        pointsSplit({ actual: N.teamScore, use: N.use, hidden: N.hidden, twist: N.twist }),
+        h('p', { class: 'small muted' }, 'Points lost in leading: reports that stayed hidden, and wrong claims from teammates that you took on board. Points lost in reasoning: how you used the reports you had. A report counts as drawn out only when a teammate cited its number, so the leading part can be overstated if teammates paraphrased.'),
         h('h3', {}, 'The habits behind good leadership'),
-        h('p', { class: 'small muted' }, 'In Study 2, these behaviours separated effective leaders from the rest. Ratings use rough thresholds set for these puzzles, not norms.'),
+        h('p', { class: 'small muted' }, 'In Study 2, these behaviours separated effective leaders from the rest. Ratings use rough thresholds set for these puzzles, not norms.' + (N.demo ? ' With two puzzles they are a first impression, not a measurement.' : '')),
         h('div', { class: 'habits' }, hb.map(x => h('div', { class: 'habit' },
           h('div', {}, h('strong', {}, x.label), h('p', { class: 'small muted' }, x.note)),
           h('span', { class: 'mono' }, x.value),
@@ -1695,7 +1710,7 @@
     function redraw() {
       drawCard(N, hb, style, (AI.settings.name || '').trim()).then(c => {
         canvas = c;
-        put(cardBox, h('img', { src: c.toDataURL('image/png'), alt: `Result card: team score ${Math.round(N.teamScore)} out of 100, leadership style ${style.name}, ${hb.map(x => x.label + ' ' + RATING[x.rating].toLowerCase()).join(', ')}.` }));
+        put(cardBox, h('img', { src: c.toDataURL('image/png'), alt: `Result card${N.demo ? ' (Quick demo)' : ''}: leading score ${Math.round(N.lead)} out of 100, team score ${Math.round(N.teamScore)}, leadership style ${style.name}, ${hb.map(x => x.label + ' ' + RATING[x.rating].toLowerCase()).join(', ')}.` }));
       }).catch(() => put(cardBox, h('span', { class: 'small muted' }, 'The result card could not be drawn in this browser.')));
     }
     redraw();
@@ -1704,7 +1719,8 @@
   const sampleText = N => (['no', 'one', 'two', 'three', 'four', 'five', 'six'][N.team.length] || N.team.length) + ' team puzzle' + (N.team.length === 1 ? '' : 's');
   function interpret(N) {
     if (!N.team.length) return 'Complete the team puzzles to see a result.';
-    return `Your score describes this game only: it mixes how well you led with how well you reason on your own, and ${sampleText(N)} is a small sample` +
+    if (N.demo) return 'This was the Quick demo, so read it as a first impression of the game, not a measurement: two puzzles are a very small sample, and which teammate made things harder was drawn at random. There are no norms for this version, so it cannot say how you compare with the leaders in Study 2 or with other people.';
+    return `Your score describes this game only: the team score mixes how well you led with how well you reason on your own, the leading score is closer to leading alone, and ${sampleText(N)} is a small sample` +
       (rangeText(N) ? ` (${rangeText(N)})` : '') +
       '. There are no norms for this version, so it cannot say how you compare with the leaders in Study 2 or with other people.' +
       (N.soloN ? '' : ' Without a warm-up this result cannot be adjusted for reasoning skill in a group comparison; the Standard length includes one.');
@@ -1715,11 +1731,13 @@
     const uniq = xs => [...new Set(xs.filter(Boolean))].join('+');
     const style = N.team.length ? COACH.leaderStyle(COACH.habits(N), N).name : '';
     const ch = N.challenges || [], kind = k => ch.filter(c => c.kind === k), frac = xs => (xs.length ? xs.filter(c => c.met).length + '/' + xs.length : '');
+    const order = orderOf(R);
     const row = { name: AI.settings.name || '', finished: new Date().toISOString(), test_version: R[0] && R[0].version || 1, engine: uniq(R.map(r => r.engine)), model: uniq(R.map(r => r.model)),
-      length: lengthOf(AI.order.length ? AI.order : R.map(r => r.id)), team_puzzles_planned: teamCount(AI.order.length ? AI.order : R.map(r => r.id)), team_puzzles_done: N.team.length,
-      team_score: fmt(N.teamScore, 2), team_score_low: fmt(N.teamLo, 2), team_score_high: fmt(N.teamHi, 2), questions_solved: N.solved, questions: N.nq, solo_score: fmt(N.soloScore, 2), solo_questions: N.soloN,
-      style, info_surfaced: N.surfaced, info_total: N.critical, twists_met: ch.filter(c => c.met).length, twists_total: ch.length, quiet_drawn_out: frac(kind('quiet')), claims_checked: frac(kind('sure')),
-      questions_per_puzzle: fmt(N.questions, 2), specific_questions_per_puzzle: fmt(N.targeted, 2), repeated_questions_per_puzzle: fmt(N.repeats, 2), followups_per_puzzle: fmt(N.followUps, 2), turns_per_puzzle: fmt(N.turns, 2), words_per_puzzle: fmt(N.words, 1), we_per_100_words: fmt(N.weRate, 2), points_lost_hidden: fmt(N.hidden, 2), points_lost_use: fmt(N.use, 2),
+      length: lengthOf(order), team_puzzles_planned: teamCount(order), team_puzzles_done: N.team.length,
+      leading_score: fmt(N.lead, 2), team_score: fmt(N.teamScore, 2), team_score_low: fmt(N.teamLo, 2), team_score_high: fmt(N.teamHi, 2), questions_solved: N.solved, questions: N.nq, solo_score: fmt(N.soloScore, 2), solo_questions: N.soloN,
+      style, info_surfaced: N.surfaced, info_total: N.critical, twist_plan: twistPlanCode(order), twists_met: ch.filter(c => c.met).length, twists_total: ch.length,
+      quiet_drawn_out: frac(kind('quiet')), worried_reassured: frac(kind('anxious')), claims_checked: frac(kind('sure')), quotes_checked: frac(kind('misquote')), disputes_settled: frac(kind('dispute')),
+      questions_per_puzzle: fmt(N.questions, 2), specific_questions_per_puzzle: fmt(N.targeted, 2), repeated_questions_per_puzzle: fmt(N.repeats, 2), followups_per_puzzle: fmt(N.followUps, 2), turns_per_puzzle: fmt(N.turns, 2), words_per_puzzle: fmt(N.words, 1), we_per_100_words: fmt(N.weRate, 2), points_lost_hidden: fmt(N.hidden, 2), points_lost_use: fmt(N.use, 2), points_lost_twists: fmt(N.twist, 2),
       fun: sv.fun || '', fair: sv.fair || '', comment: (sv.comment || '').trim() };
     R.forEach(r => { row[r.id + '_q1'] = fmt(r.scores[0], 1); row[r.id + '_q2'] = fmt(r.scores[1], 1); });
     Object.keys(row).forEach(k => { if (typeof row[k] === 'string') row[k] = row[k].replace(/−/g, '-'); });
@@ -1728,7 +1746,7 @@
   function exportAI(kind) {
     const R = AI.results, N = summaryNumbers(R), name = AI.settings.name || '';
     const version = R[0] && R[0].version || 1;
-    if (kind === 'json') { offerFile('ai_leadership_test.json', JSON.stringify({ name, finished: new Date().toISOString(), test_version: version, summary: N.team.length ? { team_score: N.teamScore, team_score_range: [N.teamLo, N.teamHi], solved: N.solved, questions: N.nq, solo_score: N.soloScore, solo_questions: N.soloN, points_lost_hidden: N.hidden, points_lost_use: N.use } : null, survey: AI.survey, puzzles: R }, null, 2), 'application/json'); return; }
+    if (kind === 'json') { offerFile('ai_leadership_test.json', JSON.stringify({ name, finished: new Date().toISOString(), test_version: version, twists: AI.twists, summary: N.team.length ? { leading_score: N.lead, points_lost_twists: N.twist, team_score: N.teamScore, team_score_range: [N.teamLo, N.teamHi], solved: N.solved, questions: N.nq, solo_score: N.soloScore, solo_questions: N.soloN, points_lost_hidden: N.hidden, points_lost_use: N.use } : null, survey: AI.survey, puzzles: R }, null, 2), 'application/json'); return; }
     const row = resultRow();
     offerFile('ai_leadership_test.csv', toCSV(Object.keys(row), [row]), 'text/csv');
   }
@@ -1763,13 +1781,30 @@
       h('div', { class: 'btn-row' }, PILOT_URL ? send : '', status),
       h('p', { class: 'small muted' }, (PILOT_URL ? '"Send anonymously" sends your scores, leadership style, these ratings and your comment, never your name or your chat. ' : '') + 'Your ratings are also added to the results file you download.'));
   }
-  // the puzzles' twists, as the leader met them
+  // the puzzles' twists, as the leader met them ('met' | 'partly' | 'missed'; older results marked a half-checked claim with `kept`)
+  const twistState = c => (c.met ? 'met' : c.partly || (c.kind === 'sure' && c.kept) ? 'partly' : 'missed');
   function twistText(c) {
-    const nm = folName(c.fid);
-    if (c.kind === 'quiet') return c.met ? `${nm} held back when you wrote to everyone, and you drew ${nm} out.` : `${nm} held back when you wrote to everyone, and ${nm}'s decisive reports stayed hidden.`;
-    return c.met ? `${nm} claimed a report rules out an option that it doesn't, and you questioned the claim instead of taking it on trust.`
-      : c.kept ? `${nm} claimed a report rules out an option that it doesn't. You kept that option among the possibilities, but the chat doesn't show you questioning the claim.`
+    const nm = folName(c.fid), st = twistState(c);
+    if (c.kind === 'quiet') return st === 'met' ? `${nm} held back when you wrote to everyone, and you drew ${nm} out.` : `${nm} held back when you wrote to everyone, and ${nm}'s decisive reports stayed hidden.`;
+    if (c.kind === 'anxious') return st === 'met' ? `${nm} was too worried to share until reassured. You reassured ${nm} and drew out what ${nm} held.`
+      : st === 'partly' ? `${nm} was too worried to share until reassured. You reassured ${nm}, but some of ${nm}'s decisive reports still stayed hidden.`
+      : `${nm} was too worried to share until reassured, and never got that reassurance, so ${nm}'s decisive reports stayed hidden.`;
+    if (c.kind === 'misquote') return st === 'met' ? `${nm} misquoted a shared report so that it seemed to rule out a right answer, and you checked the quote instead of taking it on trust.`
+      : st === 'partly' ? `${nm} misquoted a shared report so that it seemed to rule out a right answer. You kept that option, but the chat doesn't show you correcting the quote.`
+      : `${nm} misquoted a shared report so that it seemed to rule out a right answer, and you ruled that answer out.`;
+    if (c.kind === 'dispute') return st === 'met' ? `${nm} argued for keeping an option the reports rule out. You took it up and settled it on the evidence.`
+      : st === 'partly' ? `${nm} argued for keeping an option the reports rule out. You ruled it out, but the chat doesn't show you taking up the objection.`
+      : `${nm} argued for keeping an option the reports rule out, and you kept it.`;
+    return st === 'met' ? `${nm} claimed a report rules out an option that it doesn't, and you questioned the claim instead of taking it on trust.`
+      : st === 'partly' ? `${nm} claimed a report rules out an option that it doesn't. You kept that option among the possibilities, but the chat doesn't show you questioning the claim.`
       : `${nm} claimed a report rules out an option that it doesn't, and you ruled it out.`;
+  }
+  /** The twist drawn for each team puzzle, compactly, for the results file: "1Q3 2- 3S1" = puzzle t1 quiet Jonas (f3),
+   * t2 none, t3 overconfident Mira (f1). Kinds: Q quiet, A worried, S overconfident, M misquote, D dispute. */
+  function twistPlanCode(order) {
+    const K = { quiet: 'Q', anxious: 'A', sure: 'S', misquote: 'M', dispute: 'D' };
+    const of = id => (id in AI.twists ? AI.twists[id] : (AI.results.find(r => r.id === id) || {}).twist);
+    return order.filter(id => /^t\d$/.test(id)).map(id => { const t = of(id); return id.slice(1) + (t ? K[t.kind] + t.fid.slice(1) : '-'); }).join(' ');
   }
 
   /* ================= boot ================= */

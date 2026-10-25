@@ -15,9 +15,13 @@ const num = (p, re) => p.clues.find(c => re.test(c.text)).num;
 const linden = num(puzzle, /made only gilded frames/), pellow = num(puzzle, /Pellow Workshop made frames/);
 const cites = t => (t.match(/#(\d+)/g) || []).map(x => +x.slice(1));
 const caseFile = p => 'Here is the case file: ' + p.questions.map(q => q.facts.map(f => f.text).join(' ')).join(' ') + ' Which of your reports rule out an option?';
-// the twists: Jonas holds back in t1, Theo misreads a report in t2
-const t2 = P('t2'), sure = t2.dynamics.sure, jonas = F('f3'), theo = F(sure.fid);
+// the twists, as a test might draw them: Jonas holds back in t1, Theo misreads a report in t2; Mira is worried,
+// Theo misquotes a shared report or disputes a rule-out in t1
+const quietT1 = PZ.withTwist(puzzle, { kind: 'quiet', fid: 'f3' }), t2 = PZ.withTwist(P('t2'), { kind: 'sure', fid: 'f2', i: 0 });
+const sure = t2.dynamics.sure, jonas = F('f3'), theo = F('f2');
 const jonasOut = PZ.criticalFollowerClues(puzzle).filter(c => c.holder === jonas.id).map(c => c.num);
+const anxT1 = PZ.withTwist(puzzle, { kind: 'anxious', fid: 'f1' }), mqT1 = PZ.withTwist(puzzle, { kind: 'misquote', fid: 'f2', i: 0 }), dpT1 = PZ.withTwist(puzzle, { kind: 'dispute', fid: 'f2', i: 0 });
+const mq = mqT1.dynamics.misquote, dp = dpT1.dynamics.dispute;
 
 const scenarios = [
   { name: 'answers a team question', messages: [{ role: 'user', content: '[Leader, to everyone] Hi team! What do your reports say about Linden & Sons?' }], expect: t => t.includes('#' + linden) },
@@ -30,8 +34,8 @@ const scenarios = [
   // without the case file a teammate can't tell which of its reports matter; with it, it names the clash
   { name: 'can\'t pick out rule-outs without the case facts', messages: [{ role: 'user', content: '[Leader, to everyone] Please share every report you hold that rules out an option.' }], expect: t => !cites(t).includes(linden) },
   { name: 'names the clash once told a case fact', messages: [{ role: 'user', content: '[Leader, to everyone] The case file says the frame is plain dark wood, with no gilding. Do any of your reports rule out a workshop?' }], expect: t => cites(t).includes(linden) && /Linden/.test(t) },
-  { name: 'quiet Jonas holds back when the leader writes to everyone', f: jonas, messages: [{ role: 'user', content: '[Leader, to everyone] ' + caseFile(puzzle) }], expect: t => !cites(t).length },
-  { name: 'quiet Jonas opens up when addressed by name', f: jonas, messages: [
+  { name: 'quiet Jonas holds back when the leader writes to everyone', p: quietT1, f: jonas, messages: [{ role: 'user', content: '[Leader, to everyone] ' + caseFile(puzzle) }], expect: t => !cites(t).length },
+  { name: 'quiet Jonas opens up when addressed by name', p: quietT1, f: jonas, messages: [
       { role: 'user', content: '[Leader, to everyone] ' + caseFile(puzzle) },
       { role: 'assistant', content: 'I\'ll let the others go first.' },
       { role: 'user', content: '[Leader, to everyone] Jonas, what about yours? Do any clash with the case file?' }], expect: t => cites(t).some(n => jonasOut.includes(n)) },
@@ -39,7 +43,26 @@ const scenarios = [
   { name: 'overconfident Theo drops the claim when questioned', p: t2, f: theo, messages: [
       { role: 'user', content: '[Leader, to everyone] ' + caseFile(t2) },
       { role: 'assistant', content: `Report #${sure.num} rules out Strawberries: ${sure.says}.` },
-      { role: 'user', content: '[Leader, to you] Are you sure? The beds are 40 cm deep, so 15 cm roots fit easily.' }], expect: t => /right|doesn'?t|does not|not rule|stay|mistake|fair|misread|good point/i.test(t) }
+      { role: 'user', content: '[Leader, to you] Are you sure? The beds are 40 cm deep, so 15 cm roots fit easily.' }], expect: t => /right|doesn'?t|does not|not rule|stay|mistake|fair|misread|good point/i.test(t) },
+  // the newer twists
+  { name: 'worried Mira holds back even when asked by name', p: anxT1, f: mira, messages: [
+      { role: 'user', content: '[Leader, to everyone] ' + caseFile(puzzle) },
+      { role: 'assistant', content: 'I have a few, but I\'m worried I\'ll get them wrong and send us the wrong way.' },
+      { role: 'user', content: '[Leader, to you] Mira, what about yours?' }], expect: t => !cites(t).length },
+  { name: 'worried Mira opens up once reassured', p: anxT1, f: mira, messages: [
+      { role: 'user', content: '[Leader, to everyone] ' + caseFile(puzzle) },
+      { role: 'assistant', content: 'I have a few, but I\'m worried I\'ll get them wrong and send us the wrong way.' },
+      { role: 'user', content: '[Leader, to you] No worries, Mira, any info helps, and we\'ll check it together. Do any of yours clash with the case file?' }], expect: t => cites(t).includes(linden) },
+  { name: 'Theo quotes his misremembered copy as a clash', p: mqT1, f: theo, messages: [{ role: 'user', content: '[Leader, to everyone] ' + caseFile(puzzle) }], expect: t => cites(t).includes(mq.num) && /clara/i.test(t) },
+  { name: 'Theo accepts the real wording of the shared report', p: mqT1, f: theo, messages: [
+      { role: 'user', content: '[Leader, to everyone] ' + caseFile(puzzle) },
+      { role: 'assistant', content: `Report #${mq.num} rules out Clara Moss: ${mq.misquote}` },
+      { role: 'user', content: `[Leader, to you] Theo, my copy of #${mq.num} reads "Clara Moss painted in oils from 1955 onwards". Can you check yours?` }], expect: t => /misread|right|sorry|my (bad|mistake)|stays|doesn'?t|does not|1955/i.test(t) && !/still rules out/i.test(t) },
+  { name: 'Theo argues Linden & Sons stays in once told the case facts', p: dpT1, f: theo, messages: [{ role: 'user', content: '[Leader, to everyone] ' + caseFile(puzzle) }], expect: t => cites(t).includes(dp.num) && /linden/i.test(t) },
+  { name: 'Theo gives way when shown the evidence', p: dpT1, f: theo, messages: [
+      { role: 'user', content: '[Leader, to everyone] ' + caseFile(puzzle) },
+      { role: 'assistant', content: `Linden & Sons should stay in: report #${dp.num} says they left some frames without a label, so an unlabelled frame could still be theirs.` },
+      { role: 'user', content: '[Leader, to you] Theo, Mira\'s report says Linden & Sons made only gilded frames, and ours has no gilding. Doesn\'t that rule them out?' }], expect: t => /right|fair|agree|out|good point|makes sense/i.test(t) && !/stay in|keep (them|it|linden)/i.test(t) }
 ];
 
 async function askGemini(messages, system) {

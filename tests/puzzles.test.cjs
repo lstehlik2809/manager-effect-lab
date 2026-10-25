@@ -83,26 +83,69 @@ try {
   console.log('ok   the six team puzzles mirror Study 2\'s six AI-team items');
 } catch (e) { failures++; console.log('FAIL set: ' + e.message); }
 try {
-  // the twists: a quiet teammate holds something that matters; an overconfident one misreads a report it can see,
-  // about an option that is a right answer, against a case fact of the same question
-  const team = PZ.PUZZLES.filter(p => !p.solo), twist = id => team.find(p => p.id === id).dynamics;
+  // the reports the twists use: an overconfident claim or a misquote is about a right answer, against a case fact
+  // of the same question; a misquoted report is shared, so the leader can check it; a dispute defends an option
+  // that a decisive report rules out
+  const team = PZ.PUZZLES.filter(p => !p.solo);
   team.forEach(p => {
-    const d = p.dynamics || {};
-    if (d.quiet) assert(PZ.criticalFollowerClues(p).some(c => c.holder === d.quiet), p.id + ': the quiet teammate holds a decisive report');
-    if (d.sure) {
-      const s = d.sure, q = p.questions[s.q], c = p.clues.find(x => x.num === s.num);
-      assert(c && c.q === s.q && c.kind === 'noise', p.id + ': the misread report rules nothing out');
-      assert(PZ.cluesFor(p, s.fid).includes(c), p.id + ': the teammate can see the report it misreads');
-      assert(q.answer.includes(s.option) && C.optionMentions(p, c.text).some(o => o.k === s.option), p.id + ': the claim is about a right answer the report names');
-      assert(q.facts[s.fact], p.id + ': the claim rests on a case fact of the same question');
-      assert(/^[a-z]/.test(s.says) && /\.$/.test(s.why), p.id + ': says and why read as parts of a sentence');
-    }
+    assert(!Object.keys(p.dynamics).length, p.id + ': no twist built in');
+    const named = (t, qi) => C.optionMentions(p, t).filter(o => o.q === qi).map(o => o.k);
+    ['sure', 'misquote', 'dispute'].forEach(kind => p.twists[kind].forEach(s => {
+      const q = p.questions[s.q], c = p.clues.find(x => x.num === s.num), where = `${p.id} ${kind} ${c ? c.text : '?'}`;
+      assert(c && c.q === s.q && c.kind === 'noise', where + ': the report rules nothing out');
+      assert.deepStrictEqual(named(c.text, s.q), [s.option], where + ': the report names the option');
+      assert(/^[a-z]/.test(s.why) && /\.$/.test(s.why), where + ': why reads as the end of a sentence');
+      if (kind === 'dispute') {
+        assert(!q.answer.includes(s.option), where + ': the disputed option is ruled out');
+        const d = p.clues.find(x => x.num === s.dnum);
+        assert(d && d.kind === 'out' && d.rules[0] === s.option && d.fact === s.fact, where + ': the decisive report it argues against');
+        assert(/^[a-z]/.test(s.says) && !/\.$/.test(s.says), where + ': says reads as a clause');
+        return;
+      }
+      assert(q.answer.includes(s.option), where + ': the claim is about a right answer');
+      assert(q.facts[s.fact], where + ': the claim rests on a case fact of the same question');
+      if (kind === 'sure') assert(/^[a-z]/.test(s.says) && !/\.$/.test(s.says), where + ': says reads as a clause');
+      if (kind === 'misquote') {
+        assert.strictEqual(c.holder, 'public', where + ': a misquoted report is shared');
+        assert(s.misquote !== c.text && /\.$/.test(s.misquote), where + ': the misquote reads as a report');
+        assert.deepStrictEqual(named(s.misquote, s.q), [s.option], where + ': the misquote names the same option');
+        assert(!/\bruled?\s+(?:\w+\s+)?out\b|\bcannot\b|\bcan't\b/i.test(s.misquote), where + ': the misquote states no conclusion');
+      }
+    }));
+    const kinds = new Set(PZ.twistOptions(p).map(o => o.kind));
+    assert(kinds.size >= 4 && kinds.has('quiet') && kinds.has('anxious') && kinds.has('sure') && kinds.has('dispute'), p.id + ' offers most kinds: ' + [...kinds]);
+    PZ.twistOptions(p).forEach(o => {
+      if (o.kind === 'quiet' || o.kind === 'anxious') assert(PZ.criticalFollowerClues(p).some(c => c.holder === o.fid), p.id + ': a quiet or worried teammate holds a decisive report');
+      if (o.kind === 'dispute') assert.notStrictEqual(p.twists.dispute[o.i].dholder, o.fid, p.id + ': nobody disputes their own report');
+      assert(PZ.twistValid(p, o) && PZ.withTwist(p, o).twist, p.id + ' ' + JSON.stringify(o));
+    });
+    assert.strictEqual(PZ.withTwist(p, null).twist, null);
+    assert.strictEqual(PZ.withTwist(p, { kind: 'sure', fid: 'f1', i: 9 }).twist, null, 'an unknown twist is dropped');
+    assert(!Object.keys(PZ.withTwist(p, { kind: 'quiet', fid: 'leader' }).dynamics).length, 'only teammates get twists');
   });
-  assert(twist('t1').quiet && twist('t2').sure, 'Quick has one twist of each kind');
-  assert(twist('t3').quiet && twist('t4').sure && !twist('t5').quiet && !twist('t5').sure && !twist('t6').quiet && !twist('t6').sure, 'Standard adds one more of each; t5 and t6 have none');
-  const who = team.map(p => p.dynamics.quiet || (p.dynamics.sure && p.dynamics.sure.fid)).filter(Boolean);
-  assert.strictEqual(new Set(who).size, 3, 'the twists rotate over the teammates');
-  console.log('ok   teammate twists: t1 quiet, t2 overconfident, t3 quiet, t4 overconfident');
+  // the draw: about one puzzle in four has no twist, every kind and every teammate turns up, and a test
+  // repeats a kind only once it has used the others
+  let seed = 7;
+  const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const ids = PZ.PUZZLES.map(p => p.id), seen = {}, who = new Set();
+  let none = 0, n = 0;
+  for (let k = 0; k < 2000; k++) {
+    const plan = PZ.drawTwists(ids, rand);
+    assert.deepStrictEqual(Object.keys(plan), team.map(p => p.id), 'one entry per team puzzle');
+    const kinds = [];
+    team.forEach(p => {
+      const t = plan[p.id]; n++;
+      if (!t) { none++; return; }
+      assert(PZ.twistValid(p, t), JSON.stringify(t));
+      seen[t.kind] = (seen[t.kind] || 0) + 1; who.add(t.fid); kinds.push(t.kind);
+    });
+    assert(new Set(kinds.slice(0, 5)).size === Math.min(5, kinds.length), 'no repeated kind before all five are used: ' + kinds);
+  }
+  assert(none / n > 0.2 && none / n < 0.3, 'share without a twist ' + (none / n).toFixed(3));
+  assert.deepStrictEqual(Object.keys(seen).sort(), PZ.TWIST_KINDS.slice().sort(), 'every kind is drawn');
+  assert(Object.values(seen).every(x => x > 0.15 * (n - none)), JSON.stringify(seen));
+  assert.strictEqual(who.size, 3, 'every teammate gets twists');
+  console.log('ok   teammate twists: valid candidates; random draws ' + JSON.stringify(seen) + ', none ' + none + ' of ' + n);
 } catch (e) { failures++; console.log('FAIL twists: ' + e.message); }
 console.log(failures ? failures + ' puzzle check(s) failed' : 'all puzzles consistent');
 process.exit(failures ? 1 : 0);

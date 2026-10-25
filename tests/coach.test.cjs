@@ -11,10 +11,10 @@ function check(name, fn) {
   catch (e) { failures++; console.log('FAIL ' + name + '\n     ' + e.message); }
 }
 const find = id => PZ.PUZZLES.find(p => p.id === id);
-// The chat mechanics are checked on copies without the puzzles' twists (a quiet or an overconfident teammate);
-// the twists have their own checks at the end.
-const plain = p => Object.assign({}, p, { dynamics: {} });
-const T1 = find('t1'), T2 = find('t2'), T4 = find('t4'), t1 = plain(T1), t3 = plain(find('t3')), s1 = find('s1');
+// The chat mechanics are checked on the puzzles without a twist; the twists, drawn for each test in the app,
+// are applied with withTwist and have their own checks at the end.
+const tw = (id, kind, fid, i) => PZ.withTwist(find(id), Object.assign({ kind, fid }, i == null ? {} : { i }));
+const T1 = tw('t1', 'quiet', 'f3'), T2 = tw('t2', 'sure', 'f2', 0), T4 = tw('t4', 'sure', 'f3', 0), t1 = find('t1'), t3 = find('t3'), s1 = find('s1');
 const num = (p, re) => p.clues.find(c => re.test(c.text)).num;
 // t1: Mira holds the Linden & Sons rule-out and a report on Dario Ricci; Theo the Bruno Keller rule-out;
 // Jonas the Elin Berg rule-out (against the pigment case fact). In t3 the leader's own report rules out Clean Rivers Trust.
@@ -309,7 +309,7 @@ check('a quiet teammate holds back in replies to everyone and opens up when addr
   const a = C.analyse(T1, msgs, bestAnswer(T1, msgs));
   const held = PZ.criticalFollowerClues(T1).filter(c => c.holder === 'f3');
   assert(held.length >= 1 && held.every(c => a.metrics.missedNums.includes(c.num)), 'Jonas\'s decisive reports stay hidden');
-  assert.deepStrictEqual(a.metrics.challenge, { kind: 'quiet', fid: 'f3', met: false });
+  assert.deepStrictEqual(a.metrics.challenge, { kind: 'quiet', fid: 'f3', met: false, partly: false });
   const tip = a.observations.find(o => o.key === 'quiet');
   assert(tip && tip.tone === 'tip' && /Jonas held back/.test(tip.text) && /by name/.test(tip.text), tip && tip.text);
   assert(a.info.actual < 99, 'the briefing routine alone no longer gets 100 here: ' + a.info.actual);
@@ -318,7 +318,7 @@ check('a quiet teammate holds back in replies to everyone and opens up when addr
     const m2 = play(T1, [brief(T1), ask]);
     const b = C.analyse(T1, m2, bestAnswer(T1, m2));
     assert.strictEqual(b.metrics.surfaced, b.metrics.critical, ask[1] + ': surfaced ' + b.metrics.surfaced);
-    assert.deepStrictEqual(b.metrics.challenge, { kind: 'quiet', fid: 'f3', met: true });
+    assert.deepStrictEqual(b.metrics.challenge, { kind: 'quiet', fid: 'f3', met: true, partly: false });
     const good = b.observations.find(o => o.key === 'quiet');
     assert(good && good.tone === 'good' && /turned to Jonas directly/.test(good.text), good && good.text);
     assert(b.metrics.asksToAll <= 2, 'still efficient: ' + b.metrics.asksToAll);
@@ -342,13 +342,13 @@ check('an overconfident teammate claims a clash that is not there once told the 
   trusting[s.q] = [0, 1, 2, 3, 4].map(k => (trusting[s.q][k] > 0 && k !== s.option ? 1 : 0)).map((x, k, xs) => (x ? Math.round(100 / xs.filter(Boolean).length) : 0));
   trusting[s.q][trusting[s.q].findIndex(x => x > 0)] += 100 - trusting[s.q].reduce((a, b) => a + b, 0);
   const a = C.analyse(T2, msgs, trusting);
-  assert.deepStrictEqual(a.metrics.challenge, { kind: 'sure', fid: s.fid, met: false, kept: false });
+  assert.deepStrictEqual(a.metrics.challenge, { kind: 'sure', fid: s.fid, met: false, partly: false, kept: false });
   const tip = a.observations.find(o => o.key === 'swayed');
   assert(tip && /Theo said report #\d+ rules out Strawberries/.test(tip.text) && /up to 25 points/.test(tip.text) && /case file yourself/.test(tip.text), tip && tip.text);
   assert(!a.observations.some(o => o.key === 'dropped'), 'no second tip about the same option');
   // keeping the option without questioning the claim is not "checking" it: the answer alone is no evidence
   const b = C.analyse(T2, msgs, bestAnswer(T2, msgs));
-  assert.deepStrictEqual(b.metrics.challenge, { kind: 'sure', fid: s.fid, met: false, kept: true });
+  assert.deepStrictEqual(b.metrics.challenge, { kind: 'sure', fid: s.fid, met: false, partly: true, kept: true });
   assert(!b.observations.some(o => o.key === 'checked'), b.observations.map(o => o.key).join(','));
   const kc = b.observations.find(o => o.key === 'kept-claim');
   assert(kc && kc.tone === 'good' && /kept Strawberries among the possibilities/.test(kc.text) && /doesn't show you questioning/.test(kc.text), kc && kc.text);
@@ -358,7 +358,7 @@ check('an overconfident teammate claims a clash that is not there once told the 
   // questioning the claim, by name or by its report, and keeping the option is checking it
   [['f2', 'Theo, are you sure? Roots of 15 cm fit in 40 cm beds.'], ['all', 'Why would #' + s.num + ' rule out Strawberries?'], ['f2', 'Really?']].forEach(q => {
     const m2 = play(T2, [brief(T2), q]), c = C.analyse(T2, m2, bestAnswer(T2, m2));
-    assert.deepStrictEqual(c.metrics.challenge, { kind: 'sure', fid: s.fid, met: true, kept: true }, q[1]);
+    assert.deepStrictEqual(c.metrics.challenge, { kind: 'sure', fid: s.fid, met: true, partly: false, kept: true }, q[1]);
     assert(c.observations.some(o => o.key === 'checked' && o.tone === 'good' && /questioned the claim/.test(o.text)), q[1]);
   });
   // a message to everyone about something else is no challenge
@@ -402,6 +402,152 @@ check('the LLM brief carries the twist only for the teammate who has it', () => 
   const s = T2.dynamics.sure, sure = PZ.followerBrief(T2, PZ.FOLLOWERS.find(f => f.id === s.fid));
   assert(sure.includes('report #' + s.num + ' rules out Strawberries') && sure.includes(T2.questions[s.q].facts[s.fact].text), sure.slice(-600));
   assert(!/YOUR MANNER/.test(PZ.followerBrief(find('t5'), PZ.FOLLOWERS[0])), 't5 has no twist');
+});
+
+// an answer row with option k ruled out (or, keep: kept in) and an even split over the rest
+const evenOver = left => { const a = [0, 0, 0, 0, 0]; left.forEach((k, i) => { a[k] = Math.floor(100 / left.length) + (i < 100 % left.length ? 1 : 0); }); return a; };
+const without = (row, k) => evenOver([0, 1, 2, 3, 4].filter(i => row[i] > 0 && i !== k));
+const withOpt = (row, k) => evenOver([0, 1, 2, 3, 4].filter(i => row[i] > 0 || i === k));
+
+check('a worried teammate shares nothing until reassured, then opens up', () => {
+  const A = tw('t1', 'anxious', 'f1');
+  // asked by name and directly, Mira still only worries
+  const m1 = play(A, [brief(A), ['f1', 'Mira, what about yours?'], ['f1', 'Mira, please share your reports.']]);
+  const mira = m1.filter(m => m.from === 'f1');
+  assert(mira.length === 3 && mira.every(m => !C.reportNums(m.text).length && /worr|not sure|nervous|confident|wrong/i.test(m.text)), mira.map(m => m.text).join(' | '));
+  const a = C.analyse(A, m1, bestAnswer(A, m1));
+  assert.deepStrictEqual(a.metrics.challenge, { kind: 'anxious', fid: 'f1', met: false, partly: false });
+  const tip = a.observations.find(o => o.key === 'anxious');
+  assert(tip && tip.tone === 'tip' && /Mira was worried/.test(tip.text) && /fine to be unsure/.test(tip.text), tip && tip.text);
+  // reassured, she opens up and checks her reports against the case facts she heard earlier
+  ['No worries, Mira, any info helps.', 'Mira, it\'s fine if you\'re not sure. What do you have?', 'Don\'t worry about being wrong, we\'ll check together.'].forEach(calm => {
+    const m2 = play(A, [brief(A), ['f1', calm]]);
+    assert(m2.some(m => m.from === 'f1' && m.text.includes('#' + LINDEN)), calm + ': ' + m2.filter(m => m.from === 'f1').map(m => m.text).join(' | '));
+    const b = C.analyse(A, m2, bestAnswer(A, m2));
+    assert.deepStrictEqual(b.metrics.challenge, { kind: 'anxious', fid: 'f1', met: true, partly: false }, calm);
+    assert(b.observations.some(o => o.key === 'anxious' && o.tone === 'good' && /You reassured Mira/.test(o.text)), calm);
+  });
+  // reassuring everyone from the start: Mira never had to worry, so the twist doesn't apply
+  const m3 = play(A, [['all', 'Hi team, no pressure, any info helps. ' + caseFile(A) + ' Which of your reports rule out an option?']]);
+  assert(m3.some(m => m.from === 'f1' && m.text.includes('#' + LINDEN)));
+  assert(!C.analyse(A, m3, bestAnswer(A, m3)).metrics.challenge);
+  assert(!C.reassures('Mira, what do you have?') && !C.reassures('Share your reports, team.'));
+});
+
+check('a teammate who misquotes a shared report claims a false clash, and rereads it when corrected', () => {
+  const M = tw('t1', 'misquote', 'f2', 0), s = M.dynamics.misquote;
+  const msgs = play(M, [brief(M)]);
+  const claim = msgs.find(m => m.from === 'f2' && m.text.includes('#' + s.num));
+  assert(claim && /rules out Clara Moss/.test(claim.text) && /only until 1945/.test(claim.text), msgs.map(m => m.text).join(' | '));
+  // taking the quote on trust
+  const trusting = bestAnswer(M, msgs); trusting[s.q] = without(trusting[s.q], s.option);
+  const a = C.analyse(M, msgs, trusting);
+  assert.deepStrictEqual(a.metrics.challenge, { kind: 'misquote', fid: 'f2', met: false, partly: false, kept: false });
+  const tip = a.observations.find(o => o.key === 'misquoted');
+  assert(tip && /quoted shared report #\d+ as “Clara Moss painted in oils only until 1945”/.test(tip.text) && /own copy/.test(tip.text), tip && tip.text);
+  assert(!a.observations.some(o => o.key === 'dropped'), 'no second tip about the same option');
+  // pointing to the real wording, or asking to check it, corrects the quote
+  [['f2', 'Theo, my copy of #' + s.num + ' reads "Clara Moss painted in oils from 1955 onwards".'], ['f2', 'Are you sure? Check #' + s.num + ' again.']].forEach(q => {
+    const m2 = play(M, [brief(M), q]), last = m2.filter(m => m.from === 'f2').pop();
+    assert(/misread/.test(last.text) && /stays in/.test(last.text), last.text);
+    const c = C.analyse(M, m2, bestAnswer(M, m2));
+    assert.deepStrictEqual(c.metrics.challenge, { kind: 'misquote', fid: 'f2', met: true, partly: false, kept: true }, q[1]);
+    assert(c.observations.some(o => o.key === 'quote-checked' && o.tone === 'good'), q[1]);
+  });
+  // passed on as a plain report, the misquote misleads too, and can be corrected the same way
+  const M2 = tw('t2', 'misquote', 'f3', 0), s2 = M2.dynamics.misquote;
+  const plainQ = play(M2, [['f3', 'Jonas, what do you have on Strawberries?']]);
+  assert(plainQ[1].text.includes(s2.misquote) && !/rules? out/.test(plainQ[1].text), plainQ[1].text);
+  const dropped = [[20, 20, 20, 20, 20], [20, 20, 20, 20, 20]]; dropped[s2.q] = without(dropped[s2.q], s2.option);
+  const pa = C.analyse(M2, plainQ, dropped);
+  assert.deepStrictEqual(pa.metrics.challenge, { kind: 'misquote', fid: 'f3', met: false, partly: false, kept: false });
+  assert(pa.observations.some(o => o.key === 'misquoted' && /, which would rule out Strawberries/.test(o.text)) && !pa.observations.some(o => o.key === 'dropped'), pa.observations.map(o => o.text).join(' | '));
+  const fixedQ = play(M2, [['f3', 'Jonas, what do you have on Strawberries?'], ['f3', 'Jonas, my copy of #' + s2.num + ' reads differently: shallow roots, about 15 cm deep.']]);
+  assert(/misread/.test(fixedQ[fixedQ.length - 1].text) && C.analyse(M2, fixedQ, even).metrics.challenge.met, fixedQ.map(m => m.text).join(' | '));
+  // the LLM teammate gets the misquoted wording in its own list; the others see the real one
+  const own = PZ.followerBrief(M, PZ.FOLLOWERS[1]), other = PZ.followerBrief(M, PZ.FOLLOWERS[0]);
+  assert(own.includes(`Report #${s.num} (about question 1): ${s.misquote}`) && !own.includes('from 1955 onwards') && /accept the leader's wording/.test(own));
+  assert(other.includes('Clara Moss painted in oils from 1955 onwards.') && !/YOUR MANNER/.test(other));
+});
+
+check('a teammate who disputes a rule-out argues the option stays in, and gives way when shown the evidence', () => {
+  const D = tw('t1', 'dispute', 'f2', 0), d = D.dynamics.dispute;
+  // no objection to a plain question about the option
+  const early = play(D, [['all', 'What do you have on Linden & Sons?']]);
+  assert(!early.some(m => m.from === 'f2' && C.disputeObjects(D, d, m.text)), early.map(m => m.text).join(' | '));
+  // the case facts bring out a contradiction: Mira says her report rules Linden & Sons out, Theo that it stays in
+  const msgs = play(D, [brief(D), ['all', 'Thanks. So Linden & Sons is out.']]);
+  const obj = msgs.find(m => m.from === 'f2' && C.disputeObjects(D, d, m.text));
+  assert(obj && obj.text.includes('#' + d.num) && !C.disputeYields(D, d, obj.text), msgs.map(m => m.text).join(' | '));
+  assert(msgs.indexOf(obj) === 2 && msgs[1].from === 'f1' && msgs[1].text.includes('#' + d.dnum) && /#8 rules out Bruno Keller/.test(obj.text), 'with his own clashes, in reply to the case facts');
+  assert.strictEqual(msgs.filter(m => m.from === 'f2' && C.disputeObjects(D, d, m.text)).length, 1, 'said once');
+  // or, without the case facts, once the leader treats the option as ruled out
+  const late = play(D, [['all', 'What do you have on Linden & Sons?'], ['all', 'Mira says Linden & Sons made only gilded frames, so it is out.']]);
+  assert(late.some(m => m.from === 'f2' && C.disputeObjects(D, d, m.text)), late.map(m => m.text).join(' | '));
+  // kept: missed, and what it cost counts against the leading score
+  const keep = bestAnswer(D, msgs); keep[d.q] = withOpt(keep[d.q], d.option);
+  const a = C.analyse(D, msgs, keep);
+  assert.deepStrictEqual(a.metrics.challenge, { kind: 'dispute', fid: 'f2', met: false, partly: false });
+  const tip = a.observations.find(o => o.key === 'disputed');
+  assert(tip && /Theo argued that Linden & Sons should stay in/.test(tip.text) && /Mira's report #\d+ rules it out/.test(tip.text), tip && tip.text);
+  assert(!a.observations.some(o => o.key === 'kept'), 'no second tip about the same option');
+  assert(a.info.twist > 0 && Math.abs(a.info.lead - (100 - a.info.hidden - a.info.twist)) < 1e-9, JSON.stringify(a.info));
+  // ruled out without taking up the objection: partly
+  const b = C.analyse(D, msgs, bestAnswer(D, msgs));
+  assert.deepStrictEqual(b.metrics.challenge, { kind: 'dispute', fid: 'f2', met: false, partly: true });
+  assert(b.observations.some(o => o.key === 'settled-part'));
+  // taken up with the evidence: handled, and Theo gives way
+  const m2 = play(D, [brief(D), ['all', 'Thanks. So Linden & Sons is out.'], ['f2', 'Theo, Linden & Sons made only gilded frames, and ours has no gilding.']]);
+  const last = m2.filter(m => m.from === 'f2').pop();
+  assert(C.disputeYields(D, d, last.text), last.text);
+  const c = C.analyse(D, m2, bestAnswer(D, m2));
+  assert.deepStrictEqual(c.metrics.challenge, { kind: 'dispute', fid: 'f2', met: true, partly: false });
+  assert(c.observations.some(o => o.key === 'settled' && /took it up with Theo/.test(o.text)));
+  // without the report that rules it out, keeping the option was reasonable: not counted
+  const blind = play(D, [['f2', 'Linden & Sons is out, right?']]);
+  assert(blind.some(m => m.from === 'f2' && C.disputeObjects(D, d, m.text)));
+  assert(!C.analyse(D, blind, even).metrics.challenge);
+  assert(/must stay in/.test(PZ.followerBrief(D, PZ.FOLLOWERS[1])));
+});
+
+check('LLM teammates\' wording of the newer twists is recognised (from a live Gemini run)', () => {
+  const M = tw('t1', 'misquote', 'f2', 0), D = tw('t1', 'dispute', 'f2', 0), d = D.dynamics.dispute, n = M.dynamics.misquote.num;
+  const lead = { from: 'leader', to: 'all', text: caseFile(M) };
+  const mq = [lead, { from: 'f2', to: 'leader', text: `Report #${n} rules out Clara Moss since she only painted in oils until 1945, but the blue pigment was first made in 1950.` }];
+  assert(C.analyse(M, mq, even).metrics.claim.made, 'misquoted claim');
+  const fixed = mq.concat([{ from: 'leader', to: 'f2', text: `Theo, my copy of #${n} reads "Clara Moss painted in oils from 1955 onwards". Can you check yours?` },
+    { from: 'f2', to: 'leader', text: `Sorry about that, I misread it, so report #${n} doesn't rule out Clara Moss.` }]);
+  assert(C.analyse(M, fixed, bestAnswer(M, fixed)).metrics.challenge.met, 'corrected quote');
+  const obj = `Report #8 rules out Bruno Keller because he only painted on wooden panels. Also, Linden & Sons must stay in because Report #${d.num} says they put paper labels on only some frames, so an unlabelled one could be theirs.`;
+  assert(C.disputeObjects(D, d, obj) && !C.disputeYields(D, d, obj), obj);
+  const give = 'Ah, that\'s a fair point. If they only made gilded frames and ours has no gilding, then Linden & Sons is ruled out.';
+  assert(C.disputeYields(D, d, give) && !C.disputeObjects(D, d, give), give);
+});
+
+check('the leading score leaves out reasoning but counts accepted wrong claims', () => {
+  // keeping an option your own report rules out is reasoning: the leading score is unaffected
+  const r = C.analyse(t3, [], [[20, 20, 20, 20, 20], [100, 0, 0, 0, 0]]);
+  assert(r.info.twist === 0 && Math.abs(r.info.lead - (100 - r.info.hidden)) < 1e-9 && r.info.use > 0, JSON.stringify(r.info));
+  // trusting a wrong claim is leading: its cost moves from reasoning to the leading score
+  const s = T2.dynamics.sure, msgs = play(T2, [brief(T2)]), trusting = bestAnswer(T2, msgs);
+  trusting[s.q] = without(trusting[s.q], s.option);
+  const a = C.analyse(T2, msgs, trusting);
+  assert(a.info.twist > 0 && a.info.twist <= a.info.use + 1e-9 && a.info.lead < 100 - a.info.hidden, JSON.stringify(a.info));
+  const T = C.summarise([{ title: 'x', solo: false, analysis: a }, { title: 'y', solo: false, analysis: r }]).totals;
+  assert(Math.abs(T.lead - (100 - T.hidden - T.twist)) < 1e-9, JSON.stringify(T));
+});
+
+check('the style names how the leader met each kind of twist', () => {
+  const run = (p, script, answer) => { const msgs = play(p, script); return { title: p.title, solo: false, analysis: C.analyse(p, msgs, answer ? answer(msgs) : bestAnswer(p, msgs)) }; };
+  const A = tw('t1', 'anxious', 'f1'), D = tw('t1', 'dispute', 'f2', 0);
+  const handled = [run(A, [brief(A), ['f1', 'No worries, Mira, any info helps.']]),
+    run(D, [brief(D), ['all', 'Thanks. So Linden & Sons is out.'], ['f2', 'Theo, Linden & Sons made only gilded frames, and ours has no gilding.']])];
+  const H = C.summarise(handled), hs = C.leaderStyle(C.habits(H.totals), H.totals);
+  assert(/you reassured the worried one and settled a disagreement on the evidence/.test(hs.text), hs.text);
+  const keep = msgs => { const a = bestAnswer(D, msgs); a[1] = withOpt(a[1], 0); return a; };
+  const missed = [run(A, [brief(A), ['f1', 'Mira, what about yours?']]), run(D, [brief(D), ['all', 'Thanks. So Linden & Sons is out.']], keep)];
+  const X = C.summarise(missed), xs = C.leaderStyle(C.habits(X.totals), X.totals);
+  assert(/Two things to watch: a worried teammate never got the reassurance they needed to share and a teammate talked you into keeping/.test(xs.text), xs.text);
 });
 
 console.log(failures ? failures + ' check(s) failed' : 'all coach checks passed');

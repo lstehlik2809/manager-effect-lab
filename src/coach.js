@@ -183,6 +183,36 @@
   // asking about each question's options two. Collecting every report two at a time takes three or more.
   const DOUBT = /\b(sure|really|why|how so|certain|doesn'?t|does not|don'?t|not|isn'?t|is not|wrong|mistake|check|explain|enough|minimum|maximum|at least|so what)\b/i;
   const EFFICIENT_ASKS = 2;
+
+  /* ---------- the teammate twists' wording (also used by the scripted teammates) ---------- */
+  // doubting a quoted report: "my copy reads…", "check it again"
+  const QUOTE_DOUBT = /\b(copy|reads?|read it|again|actually|exact(?:ly)?|quote\w*|re-?read|look (?:again|at it)|typo)\b/i;
+  // treating an option as ruled out: "Linden is out", "drop it", "can't be Linden"
+  const OUTISH = /\b(out|ruled?|exclud\w*|eliminat\w*|drop\w*|cross\w*|remov\w*|can'?t be|isn'?t|not)\b/i;
+  const REASSURE = new RegExp('\\b(?:' + [
+    'no worries', "(?:don'?t|do not)\\s+(?:you\\s+)?(?:worry|stress|panic|be (?:shy|afraid|nervous|scared|anxious|sorry))", 'not to worry',
+    'no (?:pressure|stress|rush)', 'take your time', 'relax', "(?:it'?s|that'?s|totally|completely|perfectly) (?:ok|okay|fine|alright|all right)",
+    "(?:ok|okay|fine) (?:if|to) (?:you'?re |be )?(?:not sure|unsure|wrong)", "even if (?:you'?re|you are|it'?s|they'?re) (?:not sure|unsure|wrong|uncertain)",
+    '(?:any|every)(?:thing| bit| info(?:rmation)?| reports?| details?)? (?:helps|will help|is (?:useful|helpful|valuable|welcome|good))',
+    'no wrong answers?', 'nothing to (?:lose|worry)', "(?:we|i)(?:'ll| will) (?:check|figure|sort|work)", "we(?:'re| are) in this together",
+    "you(?:'re| are) doing (?:great|fine|well|good)", '(?:i|we) trust you', '(?:i|we) (?:really )?(?:value|appreciate) (?:your|you|it)',
+    'whatever you have', 'share (?:it )?anyway', 'mistakes are (?:ok|okay|fine)'].join('|') + ')\\b', 'i');
+  /** The leader reassures a worried teammate: "no worries", "any info helps", "it's fine to be unsure". */
+  const reassures = text => REASSURE.test(String(text));
+  // a disputing teammate arguing that an option stays in, and giving way
+  const OBJECT = /\b(?:keep\b[^.!?]{0,40}\bin\b|stays? in\b|should stay|still (?:possible|in\b|fits?|works?|a candidate|in the running)|can'?t (?:be )?ruled? (?:\w+ )?out|(?:don'?t|shouldn'?t|wouldn'?t|not sure we (?:can|should)) (?:rule|drop|cross|exclude)|not ruled out)/i;
+  const GIVE = /\b(?:fair (?:point|enough)|good point|you'?re right|i stand corrected|my mistake|i was wrong|i agree|(?:is|are) (?:ruled )?out\b|ruled out (?:then|after all))/i;
+  const aboutDisputed = (p, d, text) => optionMentions(p, text).some(o => o.q === d.q && o.k === d.option);
+  /** The teammate of dispute twist d argues that its option stays in. */
+  const disputeObjects = (p, d, text) => aboutDisputed(p, d, text) && OBJECT.test(text) && !GIVE.test(text);
+  /** … and gives way. */
+  const disputeYields = (p, d, text) => (aboutDisputed(p, d, text) || reportNums(text).includes(d.num)) && GIVE.test(text) && !OBJECT.test(text.replace(/\bstays? in\b/gi, ''));
+  /** A text passes on what rules the disputed option out: the decisive report, its details, or the case fact it clashes with. */
+  function disputeEvidence(p, d, text) {
+    const v = vocab(p), dec = p.clues.find(c => c.num === d.dnum);
+    const keys = new Set(tokens(dec.text).filter(t => v.specific.has(t) && !v.optionKeys.has(t)));
+    return reportNums(text).includes(d.dnum) || tokens(text).some(t => keys.has(t)) || factMentions(p, text).some(f => f.q === d.q && f.i === d.fact);
+  }
   const NUM = ['no', 'one', 'two', 'three', 'four', 'five', 'six'];
 
   /**
@@ -297,13 +327,10 @@
       const dropped = q.answer.filter(k => !(a[k] > 0));
       const pos = [0, 1, 2, 3, 4].filter(k => a[k] > 0 && !out.has(k));
       const uneven = pos.length >= 2 && Math.max(...pos.map(k => a[k])) - Math.min(...pos.map(k => a[k])) >= 10;
-      return { best, actual, hidden: 100 - Math.max(best, actual), use: Math.max(0, best - actual), kept, dropped, uneven };
+      // twist: the part of `use` lost by taking a teammate's wrong claim or objection on board (set below); it counts as leading
+      return { best, actual, hidden: 100 - Math.max(best, actual), use: Math.max(0, best - actual), twist: 0, kept, dropped, uneven, left: [0, 1, 2, 3, 4].filter(k => !out.has(k)) };
     });
-    const info = {
-      perQ: perQ.map(x => ({ best: x.best, actual: x.actual, hidden: x.hidden, use: x.use })),
-      best: S.mean(perQ.map(x => x.best)), actual: S.mean(perQ.map(x => x.actual)),
-      hidden: S.mean(perQ.map(x => x.hidden)), use: S.mean(perQ.map(x => x.use))
-    };
+    const scoreOf = (qi, left) => S.credenceScore(S.correctDist(left, 5), S.correctDist(p.questions[qi].answer, 5));
 
     /* observations: specific things the leader did, good and to try next time */
     const obs = [];
@@ -388,65 +415,129 @@
       });
       if (opts.timeLeft >= 60 && missed.length && !perQ.every(x => x.actual >= 99.5)) tip('early', 2, `You submitted with ${Math.floor(opts.timeLeft / 60)}:${String(Math.round(opts.timeLeft % 60)).padStart(2, '0')} left while ${missed.length === 1 ? 'a decisive report was' : missed.length + ' decisive reports were'} still hidden.`);
 
-      // the puzzle's twist: a teammate who holds back, or one who claims a clash that isn't there
+      // the puzzle's twist, drawn for this test: a teammate who holds back, needs reassurance, claims a clash that
+      // isn't there, misquotes a shared report, or argues for an option the reports rule out
       const dyn = p.dynamics || {};
+      const decisive = k => (k === 1 ? 'a decisive report' : NUM[k] + ' decisive reports');
       if (dyn.quiet) {
         const qf = dyn.quiet, nm = nameOf(qf), held = critical.filter(c => c.holder === qf), got = held.filter(c => surfaced.has(c.num));
         // held back: the leader wrote to everyone without naming this teammate at least once
         const heldBack = leaderMsgs.some(x => !x.direct && x.aud.includes(qf));
         metrics.quiet = { fid: qf, held: held.length, surfaced: got.length, asked: askedDirect.has(qf), heldBack };
         if (held.length && heldBack) {
-          metrics.challenge = { kind: 'quiet', fid: qf, met: got.length === held.length };
+          metrics.challenge = { kind: 'quiet', fid: qf, met: got.length === held.length, partly: false };
           if (got.length === held.length) good('quiet', 12, `${nm} held back when you wrote to everyone. You turned to ${nm} directly and drew out ${listText(got.map(c => '#' + c.num))}. Quiet teammates often hold what the team is missing.`);
-          else if (!askedDirect.has(qf)) tip('quiet', 7 + 2 * (held.length - got.length), `${nm} held back whenever you wrote to everyone and never passed on ${held.length - got.length === 1 ? 'a decisive report' : NUM[held.length - got.length] + ' decisive reports'}. When a teammate says little, ask them by name: quiet teammates often hold what the team is missing.`);
+          else if (!askedDirect.has(qf)) tip('quiet', 7 + 2 * (held.length - got.length), `${nm} held back whenever you wrote to everyone and never passed on ${decisive(held.length - got.length)}. When a teammate says little, ask them by name: quiet teammates often hold what the team is missing.`);
         }
       }
-      if (dyn.sure) {
-        const s = dyn.sure, nm = nameOf(s.fid), opt = optName(s.q, s.option);
+      if (dyn.anxious) {
+        const af = dyn.anxious, nm = nameOf(af), held = critical.filter(c => c.holder === af), got = held.filter(c => surfaced.has(c.num));
+        // it comes into play when the leader asks the teammate something before reassuring them
+        const calmAt = leaderMsgs.findIndex(x => x.aud.includes(af) && reassures(x.m.text));
+        const askAt = leaderMsgs.findIndex(x => x.aud.includes(af) && x.qs.length && !reassures(x.m.text));
+        const all = got.length === held.length;
+        metrics.anxious = { fid: af, held: held.length, surfaced: got.length, reassured: calmAt >= 0 };
+        if (held.length && askAt >= 0 && (calmAt < 0 || askAt < calmAt) && !(calmAt < 0 && all)) {
+          metrics.challenge = { kind: 'anxious', fid: af, met: calmAt >= 0 && all, partly: calmAt >= 0 && !all };
+          if (calmAt >= 0 && all) good('anxious', 12, `${nm} was worried about getting things wrong and held back. You reassured ${nm} (“${quote(leaderMsgs[calmAt].m.text, 70)}”) and drew out ${listText(got.map(c => '#' + c.num))}. A word of encouragement often unlocks what a hesitant teammate knows.`);
+          else if (calmAt < 0) tip('anxious', 7 + 2 * (held.length - got.length), `${nm} was worried about getting things wrong and never passed on ${decisive(held.length - got.length)}. Asking again doesn't help a worried teammate; saying that it's fine to be unsure, or that any information helps, does.`);
+        }
+      }
+      if (dyn.dispute) {
+        const d = dyn.dispute, nm = nameOf(d.fid), opt = optName(d.q, d.option);
+        const objAt = messages.findIndex(m => m.from === d.fid && disputeObjects(p, d, m.text));
+        if (objAt >= 0) {
+          // taken up: after the objection the leader writes to the teammate about it with a doubt or the evidence, or the teammate gives way
+          const gave = messages.some((m, i) => i > objAt && m.from === d.fid && disputeYields(p, d, m.text));
+          const addressed = gave || messages.some((m, i) => {
+            if (i <= objAt || m.from !== 'leader' || !audienceOf(m).includes(d.fid)) return false;
+            const ev = disputeEvidence(p, d, m.text);
+            return (aboutDisputed(p, d, m.text) || reportNums(m.text).includes(d.num) || ev) && (DOUBT.test(m.text) || ev);
+          });
+          const out = !(+answers[d.q][d.option] > 0), known = avail.has(d.dnum);
+          metrics.dispute = { fid: d.fid, made: true, addressed, out, known };
+          // only when the leader had the report that rules the option out; without it, keeping the option was reasonable
+          if (known) {
+            metrics.challenge = { kind: 'dispute', fid: d.fid, met: out && addressed, partly: out && !addressed };
+            const src = ref(d.dnum), Src = src[0].toUpperCase() + src.slice(1);
+            if (out && addressed) good('settled', 12, `${nm} argued that ${opt} should stay in, citing report #${d.num}. You took it up with ${nm} and ruled ${opt} out on the evidence: ${d.why}`);
+            else if (out) good('settled-part', 4, `${nm} argued that ${opt} should stay in, citing report #${d.num}. You ruled ${opt} out, which was right: ${d.why} The chat doesn't show you taking up the objection, though; settling a disagreement in the open keeps the team with you.`);
+            else {
+              const x = perQ[d.q], withIt = scoreOf(d.q, x.left.concat([d.option]));
+              x.twist = Math.max(0, Math.min(x.use, x.best - withIt));
+              tip('disputed', 9, `${nm} argued that ${opt} should stay in, citing report #${d.num}, and you kept it. ${Src} rules it out: ${d.why} Keeping it cost up to ${Math.round(100 - withIt)} points on Q${d.q + 1}. When teammates disagree, weigh each report against the case file rather than splitting the difference.`);
+            }
+          }
+        }
+      }
+      if (dyn.sure || dyn.misquote) {
+        const mis = !dyn.sure, s = dyn.sure || dyn.misquote, nm = nameOf(s.fid), opt = optName(s.q, s.option);
         // the teammate cites the misread report and says it rules the option out (a concession doesn't count)
         const CONCEDE = /\b(?:doesn'?t|does not|not|isn'?t|no longer)\s+(?:actually\s+)?(?:rule|clash)|stays in|after all/i;
         const aboutOpt = text => optionMentions(p, text).some(o => o.q === s.q && o.k === s.option);
-        const claimAt = messages.findIndex(m => m.from === s.fid && reportNums(m.text).includes(s.num) &&
-          /\brul(?:e|es|ed|ing)\s+(?:\w+\s+){0,2}out\b|\bexclud|\bdrop\b|\bcan'?t be\b/i.test(m.text) && !CONCEDE.test(m.text) && aboutOpt(m.text));
-        const claimed = claimAt >= 0;
+        const ruleOut = m => /\brul(?:e|es|ed|ing)\s+(?:\w+\s+){0,2}out\b|\bexclud|\bdrop\b|\bcan'?t be\b/i.test(m.text) && aboutOpt(m.text);
+        // a misquote misleads even when passed on as a plain report: it counts once its wrong wording comes up
+        // (a number, or two longer words, that the real report doesn't have)
+        const real = new Set(words(clueBy.get(s.num).text)), wrong = mis ? words(s.misquote).filter(w => !real.has(w) && (w.length >= 4 || /^\d+$/.test(w))) : [];
+        const quotes = m => mis && words(m.text).filter(w => wrong.includes(w)).some((w, k, xs) => /^\d+$/.test(w) || xs.length >= 2);
+        const claimAt = messages.findIndex(m => m.from === s.fid && reportNums(m.text).includes(s.num) && (ruleOut(m) || quotes(m)) && !CONCEDE.test(m.text) && !/\bmisread\b/i.test(m.text));
+        const claimed = claimAt >= 0, asClash = claimed && ruleOut(messages[claimAt]);
         // questioned: after the claim, the leader doubts it in a message that reaches the teammate and is about the claim
         // (its report, option or reasoning, or a direct reply to it), or the teammate takes it back. The answer alone is no evidence.
-        const claimToks = new Set(tokens(s.says + ' ' + clueBy.get(s.num).text));
+        // A misquote is also questioned by pointing to the report's real wording ("my copy reads…").
+        const claimToks = new Set(tokens((mis ? s.misquote : s.says) + ' ' + clueBy.get(s.num).text));
+        const doubts = t => DOUBT.test(t) || (mis && QUOTE_DOUBT.test(t));
         let lastFrom = -1;
         const questioned = claimed && messages.some((m, i) => {
           if (i <= claimAt) { if (m.from === s.fid) lastFrom = i; return false; }
-          if (m.from === s.fid) { const back = (reportNums(m.text).includes(s.num) || aboutOpt(m.text)) && CONCEDE.test(m.text); lastFrom = i; return back; }
+          if (m.from === s.fid) { const back = (reportNums(m.text).includes(s.num) || aboutOpt(m.text)) && (CONCEDE.test(m.text) || /\bmisread\b/i.test(m.text)); lastFrom = i; return back; }
           if (m.from !== 'leader') return false;
           const aud = audienceOf(m);
           if (!aud.includes(s.fid)) return false;
           const about = reportNums(m.text).includes(s.num) || aboutOpt(m.text) || tokens(m.text).some(t => claimToks.has(t)) ||
             (aud.length < FOL.length && lastFrom === claimAt);
-          return about && DOUBT.test(m.text);
+          return about && doubts(m.text);
         });
         const kept = +answers[s.q][s.option] > 0;
-        metrics.claim = { fid: s.fid, made: claimed, kept, questioned };
+        metrics.claim = { fid: s.fid, made: claimed, kept, questioned, misquote: mis };
         if (claimed) {
-          metrics.challenge = { kind: 'sure', fid: s.fid, met: kept && questioned, kept };
+          metrics.challenge = { kind: mis ? 'misquote' : 'sure', fid: s.fid, met: kept && questioned, partly: kept && !questioned, kept };
           const cost = Math.round(100 - S.credenceScore(S.correctDist(p.questions[s.q].answer.filter(k => k !== s.option), 5), S.correctDist(p.questions[s.q].answer, 5)));
-          if (kept && questioned) good('checked', 12, `${nm} said report #${s.num} rules out ${opt}. You questioned the claim instead of taking it on trust and kept ${opt}, which was right: ${s.why}`);
-          else if (kept) good('kept-claim', 4, `${nm} said report #${s.num} rules out ${opt}. You kept ${opt} among the possibilities, which was right: ${s.why} The chat doesn't show you questioning the claim, though; asking ${nm} which case fact it clashes with makes sure.`);
-          else tip('swayed', 9, `${nm} said report #${s.num} rules out ${opt}, and ${questioned ? 'although you questioned it, ' : ''}you ruled it out. It doesn't: ${s.why} ${opt} was one of the right answers on Q${s.q + 1}, so ${questioned ? 'dropping it' : 'taking the claim on trust'} cost up to ${cost} points. When a teammate says a report rules an option out, check it against the case file yourself.`);
+          if (!kept) { const x = perQ[s.q]; x.twist = Math.max(0, Math.min(x.use, x.best - scoreOf(s.q, x.left.filter(k => k !== s.option)))); }
+          const said = mis ? `${nm} quoted shared report #${s.num} as “${quote(s.misquote)}”` + (asClash ? ` and said it rules out ${opt}` : `, which would rule out ${opt}`) : `${nm} said report #${s.num} rules out ${opt}`;
+          if (mis) {
+            if (kept && questioned) good('quote-checked', 12, `${said}. You checked the quote instead of taking it on trust and kept ${opt}, which was right: ${s.why}`);
+            else if (kept) good('quote-kept', 4, `${said}. You kept ${opt} among the possibilities, which was right: ${s.why} The chat doesn't show you correcting the quote, though; you have the same report, so pointing to its real wording sets the team straight.`);
+            else tip('misquoted', 9, `${said}, and ${questioned ? 'although you questioned it, ' : ''}you ruled it out. It doesn't: ${s.why} ${opt} was one of the right answers on Q${s.q + 1}, so ${questioned ? 'dropping it' : 'taking the quote on trust'} cost up to ${cost} points. When a teammate quotes a report you can see, check it against your own copy.`);
+          } else if (kept && questioned) good('checked', 12, `${said}. You questioned the claim instead of taking it on trust and kept ${opt}, which was right: ${s.why}`);
+          else if (kept) good('kept-claim', 4, `${said}. You kept ${opt} among the possibilities, which was right: ${s.why} The chat doesn't show you questioning the claim, though; asking ${nm} which case fact it clashes with makes sure.`);
+          else tip('swayed', 9, `${said}, and ${questioned ? 'although you questioned it, ' : ''}you ruled it out. It doesn't: ${s.why} ${opt} was one of the right answers on Q${s.q + 1}, so ${questioned ? 'dropping it' : 'taking the claim on trust'} cost up to ${cost} points. When a teammate says a report rules an option out, check it against the case file yourself.`);
         }
       }
     }
     // using the reports: the same checks for solo and team puzzles
+    const dsp = p.dynamics && p.dynamics.dispute, disputed = (qi, k) => !!(metrics.challenge && metrics.challenge.kind === 'dispute' && dsp.q === qi && dsp.option === k);
     perQ.forEach((x, qi) => {
-      x.kept.slice(0, 1).forEach(kp => {
+      x.kept.filter(kp => !disputed(qi, kp.k)).slice(0, 1).forEach(kp => {
         const refs = listText(kp.refs.map(n => (p.solo ? '#' + n : ref(n)))) + (kp.refs.length > 1 ? ' together' : '');
         tip('kept', 2 + kp.pct / 6, (p.solo ? `The reports rule out ${optName(qi, kp.k)} (${refs})` : `You had what you needed to rule out ${optName(qi, kp.k)} (${refs})`) + `, but you still gave it ${kp.pct}%.`);
       });
-      x.dropped.filter(k => !(metrics.claim && metrics.claim.made && p.dynamics.sure.q === qi && p.dynamics.sure.option === k)).slice(0, 1).forEach(k => tip('dropped', 4, `You ruled out ${optName(qi, k)}, but no report rules it out: it was one of the right answers on Q${qi + 1}.`));
+      const cl = p.dynamics && (p.dynamics.sure || p.dynamics.misquote);
+      x.dropped.filter(k => !(metrics.claim && metrics.claim.made && cl.q === qi && cl.option === k)).slice(0, 1).forEach(k => tip('dropped', 4, `You ruled out ${optName(qi, k)}, but no report rules it out: it was one of the right answers on Q${qi + 1}.`));
       if (x.uneven && !x.kept.length && !x.dropped.length) tip('uneven', 2, `On Q${qi + 1} you gave unequal shares to options that no report ${p.solo ? '' : 'you saw '}separated. When the reports can't tell options apart, equal shares score best.`);
     });
     const perfect = perQ.every(x => x.actual >= 99.5);
     if (perfect) good('perfect', 5, p.solo ? 'You read every report correctly.' : 'You got the exact answer on both questions.');
     else if (!p.solo && perQ.every(x => x.use < 1 && x.actual <= x.best + 1)) good('used-well', 3, 'You used the reports you gathered well: your answer was the best one possible with them.');
 
+    // the leading score leaves out reasoning: 100 minus the points lost to reports that stayed hidden and to a
+    // teammate's wrong claim or objection taken on board
+    const info = {
+      perQ: perQ.map(x => ({ best: x.best, actual: x.actual, hidden: x.hidden, use: x.use, twist: x.twist })),
+      best: S.mean(perQ.map(x => x.best)), actual: S.mean(perQ.map(x => x.actual)),
+      hidden: S.mean(perQ.map(x => x.hidden)), use: S.mean(perQ.map(x => x.use)), twist: S.mean(perQ.map(x => x.twist)),
+      lead: S.mean(perQ.map(x => 100 - x.hidden - x.twist))
+    };
     return { metrics, info, observations: obs };
   }
   function jaccard(a, b) {
@@ -475,6 +566,8 @@
       surfaced: sum('surfaced'), critical: sum('critical'), repeatsTotal: sum('repeats'), connectsTotal: sum('connects'),
       targetedShare: sum('targeted') + sum('generic') ? sum('targeted') / (sum('targeted') + sum('generic')) : NaN,
       hidden: allQ.length ? S.mean(allQ.map(x => x.hidden)) : NaN, use: allQ.length ? S.mean(allQ.map(x => x.use)) : NaN,
+      // (results saved before the leading score existed have no twist part)
+      twist: allQ.length ? S.mean(allQ.map(x => x.twist || 0)) : NaN, lead: allQ.length ? S.mean(allQ.map(x => 100 - x.hidden - (x.twist || 0))) : NaN,
       allAsked: team.filter(r => r.analysis.metrics.askedDirect.length === FOL.length).length,
       allSurfaced: team.filter(r => r.analysis.metrics.critical && r.analysis.metrics.surfaced === r.analysis.metrics.critical).length,
       quickPuzzles: team.filter(r => quickDone(r.analysis.metrics)).length, puzzles: n,
@@ -509,12 +602,18 @@
       if (o.key === 'quiet' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate held back when you wrote to everyone, and each time you turned to them directly and drew out what they held.`; o.puzzle = null; }
       if (o.key === 'checked' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate claimed a report rules out an option that it doesn't, and each time you questioned the claim instead of taking it on trust.`; o.puzzle = null; }
       if (o.key === 'kept-claim' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate claimed a report rules out an option that it doesn't, and each time you kept that option among the possibilities. The chat doesn't show you questioning the claims, though.`; o.puzzle = null; }
+      if (o.key === 'anxious' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate was too worried to share until you reassured them, and each time you did and drew out what they held.`; o.puzzle = null; }
+      if (o.key === 'quote-checked' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate misquoted a shared report, and each time you checked the quote instead of taking it on trust.`; o.puzzle = null; }
+      if (o.key === 'settled' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate argued for an option the reports rule out, and each time you took it up and settled it on the evidence.`; o.puzzle = null; }
       if (o.key === 'context' && totals.contextPuzzles > 1) { o.text = `You told your teammates what the case file says in ${totals.contextPuzzles === n ? (n === 2 ? 'both' : 'all ' + n) : totals.contextPuzzles + ' of ' + n} team puzzles, so they could judge which of their reports rule an option out.`; o.weight += totals.contextPuzzles; o.puzzle = null; }
     });
     tips.forEach(o => {
       if (o.key === 'no-context' && o.count > 1) { o.text = `In ${o.count} team puzzles you didn't tell your teammates what the case file says. Only you had it, so they couldn't tell which of their reports rule an option out. Passing on the case facts lets them pick out the decisive ones.`; o.puzzle = null; }
       if (o.key === 'swayed' && o.count > 1) { o.text = `In ${o.count} team puzzles you ruled out an option because a teammate said a report rules it out, and it didn't. When a teammate claims a clash, check the report against the case file yourself.`; o.puzzle = null; }
       if (o.key === 'quiet' && o.count > 1) { o.text = `In ${o.count} team puzzles a quiet teammate held back when you wrote to everyone, and their decisive reports stayed hidden. When a teammate says little, ask them by name.`; o.puzzle = null; }
+      if (o.key === 'anxious' && o.count > 1) { o.text = `In ${o.count} team puzzles a worried teammate never got the reassurance they needed, and their decisive reports stayed hidden. Telling a hesitant teammate that it's fine to be unsure helps more than asking again.`; o.puzzle = null; }
+      if (o.key === 'misquoted' && o.count > 1) { o.text = `In ${o.count} team puzzles you ruled out an option because a teammate misquoted a shared report. When a teammate quotes a report you can see, check it against your own copy.`; o.puzzle = null; }
+      if (o.key === 'disputed' && o.count > 1) { o.text = `In ${o.count} team puzzles a teammate talked you into keeping an option the reports rule out. When teammates disagree, weigh each report against the case file.`; o.puzzle = null; }
       if (o.key === 'repeats' && o.count > 1) { o.text = `Across the test, ${totals.repeatsTotal} of your questions repeated an earlier one, such as “${o.example}”. ${REPEAT_ADVICE}`; o.puzzle = null; }
     });
     const pick = (xs, k) => xs.sort((a, b) => b.weight - a.weight).slice(0, k);
@@ -543,23 +642,29 @@
       { label: 'Drawing out hidden clues', value: `${T.surfaced} of ${T.critical} decisive clues`, rating: rate(T.critical ? T.surfaced / T.critical : NaN, 0.75, 0.4), note: 'Weak leaders learned little from their team: their answers looked like uninformed guesses.' }
     ];
   }
+  // how the leader dealt with each kind of twist, for the style's last sentence
+  const TWIST_WORDS = {
+    quiet: { done: 'drew out the quiet one', miss: 'a quiet teammate kept what they knew', tip: 'Ask the quiet ones by name.' },
+    anxious: { done: 'reassured the worried one', miss: 'a worried teammate never got the reassurance they needed to share', part: 'you reassured a worried teammate, but some of what they knew stayed hidden', tip: 'Tell a hesitant teammate that it\'s fine to be unsure.' },
+    sure: { done: 'questioned the overconfident one', miss: 'you took a teammate\'s wrong claim on trust', part: 'you kept the option a teammate wrongly ruled out, but didn\'t question the claim: ask which case fact it clashes with', tip: 'Check claims against the case file.' },
+    misquote: { done: 'checked a misquoted report against your own copy', miss: 'you took a misquoted report on trust', part: 'you kept the option a misquoted report seemed to rule out, but didn\'t correct the quote', tip: 'Check a quoted report against your own copy.' },
+    dispute: { done: 'settled a disagreement on the evidence', miss: 'a teammate talked you into keeping an option the reports rule out', part: 'you ruled out the option a teammate argued for, but didn\'t take up the objection', tip: 'When teammates disagree, weigh each report against the case file.' }
+  };
+  const COUNT = ['', 'One thing', 'Two things', 'Three things', 'Four things', 'Five things', 'Six things'];
   /** A playful leadership style from the habits: { name, text }. Every claim in the text rests on behaviour seen in the chat.
-   * The puzzles' twists add a sentence: how the leader dealt with a quiet teammate or a wrong claim. */
+   * The twists the leader met add a sentence: what they handled, half handled or missed. */
   function leaderStyle(hb, T) {
     const st = baseStyle(hb, T), ch = T.challenges || [];
-    const missedQuiet = ch.some(c => c.kind === 'quiet' && !c.met), swayed = ch.some(c => c.kind === 'sure' && !c.met && !c.kept);
-    const unchecked = ch.some(c => c.kind === 'sure' && !c.met && c.kept);
-    const handled = ch.length && ch.every(c => c.met);
+    // results saved before `partly` existed marked a half-handled claim with `kept`
+    const state = c => (c.met ? 'done' : c.partly || (c.kind === 'sure' && c.kept) ? 'part' : 'miss');
+    const words = s => [...new Set(ch.filter(c => TWIST_WORDS[c.kind] && state(c) === s).map(c => TWIST_WORDS[c.kind][s]))];
+    const done = words('done'), part = words('part'), miss = words('miss');
     let add = '';
-    if (swayed && missedQuiet) add = 'Two things to watch: a quiet teammate kept what they knew, and you took a teammate\'s wrong claim on trust.';
-    else if (swayed) add = 'One thing to watch: you took a teammate\'s wrong claim on trust. Check claims against the case file.';
-    else if (missedQuiet) add = 'One thing to watch: a quiet teammate kept what they knew. Ask the quiet ones by name.';
-    else if (unchecked) add = (ch.some(c => c.kind === 'quiet') ? 'You drew out the quiet teammate. ' : '') + 'You kept the option a teammate wrongly ruled out, but didn\'t question the claim: ask which case fact it clashes with.';
-    else if (handled) {
-      const kinds = new Set(ch.map(c => c.kind));
-      add = kinds.size > 1 ? 'You also handled the teammates who made it harder: you drew out the quiet one and questioned the overconfident one.'
-        : kinds.has('quiet') ? 'You also noticed the teammate who held back and drew them out.' : 'You also questioned the teammate who claimed too much instead of taking it on trust.';
-    }
+    if (miss.length) {
+      add = `${COUNT[miss.length] || miss.length + ' things'} to watch: ${listText(miss)}.`;
+      if (miss.length === 1) add += ' ' + TWIST_WORDS[ch.find(c => state(c) === 'miss' && TWIST_WORDS[c.kind]).kind].tip;
+    } else if (part.length) add = (done.length ? `You ${listText(done)}. ` : '') + part.map(t => t[0].toUpperCase() + t.slice(1) + '.').join(' ');
+    else if (done.length) add = done.length > 1 ? `You also handled the teammates who made it harder: you ${listText(done)}.` : `You also handled the teammate who made it harder: you ${done[0]}.`;
     return add ? { name: st.name, text: st.text + ' ' + add } : st;
   }
   function baseStyle(hb, T) {
@@ -588,6 +693,7 @@
     return { name: 'The Coordinator', text: 'You kept the team moving and got part of the picture. A few more follow-up questions, or telling the team what the case file says, would surface the rest.' };
   }
 
-  root.MEL_COACH = { tokens, words, vocab, optionMentions, reportNums, questionMention, factMentions, sentences, isQuestion, vocatives, audienceOf, ruledOut, bestWith, analyse, top, summarise, habits, leaderStyle };
+  root.MEL_COACH = { tokens, words, vocab, optionMentions, reportNums, questionMention, factMentions, sentences, isQuestion, vocatives, audienceOf, ruledOut, bestWith, analyse, top, summarise, habits, leaderStyle,
+    DOUBT, QUOTE_DOUBT, OUTISH, reassures, disputeObjects, disputeYields, disputeEvidence };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.MEL_COACH;
 })(typeof window !== 'undefined' ? window : globalThis);
