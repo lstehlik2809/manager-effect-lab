@@ -1,5 +1,4 @@
 node_modules/
-dist/
 .env
 .wrangler/
 pilot_results*.csv

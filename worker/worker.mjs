@@ -11,7 +11,7 @@ import PZ from '../src/puzzles.js';
 import LLM from '../src/llm.js';
 
 const MAX_BODY = 64 * 1024, MAX_TURNS = 80, MAX_USER = 4000, MAX_REPLY = 2000, MAX_TOTAL = 40000;
-const LENGTH_IDS = ['quick', 'standard', 'extended'], ENGINES = ['hosted', 'scripted', 'gemini', 'api', 'claude'];
+const LENGTH_IDS = ['quick', 'standard', 'extended'], ENGINES = ['hosted', 'scripted', 'gemini', 'api'];
 const MAX_FIELDS = 80, MAX_VALUE = 80, MAX_COMMENT = 600, MAX_RESULTS = 20000;
 
 const error = (status, reason, message, cors) => new Response(JSON.stringify({ error: { code: status, status: reason, message } }),

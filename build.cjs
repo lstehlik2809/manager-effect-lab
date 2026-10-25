@@ -1,4 +1,4 @@
-// Inlines src/ into one self-contained index.html (GitHub Pages) and a fragment for a claude.ai artifact.
+// Inlines src/ into one self-contained index.html (GitHub Pages).
 const fs = require('fs');
 const path = require('path');
 const read = f => fs.readFileSync(path.join(__dirname, 'src', f), 'utf8');
@@ -37,8 +37,5 @@ ${scripts}
 </body>
 </html>
 `;
-const fragment = `<title>${title}</title>\n${themeBoot}\n${fonts}\n<style>\n${css}\n</style>\n${body}\n${scripts}\n`;
 fs.writeFileSync(path.join(__dirname, 'index.html'), full);
-fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });
-fs.writeFileSync(path.join(__dirname, 'dist', 'artifact.html'), fragment);
-console.log('index.html', (full.length / 1024).toFixed(1) + ' KB; dist/artifact.html', (fragment.length / 1024).toFixed(1) + ' KB');
+console.log('index.html', (full.length / 1024).toFixed(1) + ' KB');

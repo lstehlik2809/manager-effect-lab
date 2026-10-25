@@ -3169,23 +3169,15 @@ HOW TO TAKE PART
     set(k, v) { try { localStorage.setItem('mel.' + k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } },
     del(k) { try { localStorage.removeItem('mel.' + k); } catch (e) { /* storage unavailable */ } }
   };
-  const inClaude = !!(window.claude && typeof window.claude.use === 'function');
-
   /* ---------- files out ---------- */
-  let downloadsCap = null;
-  if (inClaude) window.claude.use('downloads').then(d => { downloadsCap = d; }).catch(() => {});
   async function offerFile(filename, content, mime) {
-    if (downloadsCap) {
-      try { await downloadsCap.save({ filename, data: content }); return; }
-      catch (e) { if (e && e.code === 'declined') return; }
-    }
-    if (!inClaude) {
+    try {
       const url = URL.createObjectURL(new Blob([content], { type: mime || 'text/plain;charset=utf-8' }));
       const a = h('a', { href: url, download: filename });
       document.body.append(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 4000);
       return;
-    }
+    } catch (e) { /* downloads blocked: show the text instead */ }
     textModal(filename, content);
   }
   function textModal(title, content) {
@@ -3814,16 +3806,14 @@ HOW TO TAKE PART
     { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', note: 'faster · cheaper' },
     { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', note: 'fastest · cheapest' }
   ];
-  // The same app published on claude.ai, where teammates run on the viewer's own Claude account (no key).
-  const CLAUDE_URL = 'https://claude.ai/artifact/696yvnhLNTxw2zjFXYXz42';
   // Hosted AI teammates (worker/worker.mjs): live teammates with no key for visitors. Empty until the
   // worker is deployed; set it to the worker's URL ending in /reply and the option appears.
   // On localhost, ?hosted=<url> points at a local stand-in (worker/dev-server.mjs) instead.
   const HOSTED_DEPLOYED = 'https://manager-effect-lab-teammates.ludek-stehlik.workers.dev/reply';
   const HOSTED_URL = (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).get('hosted')) || HOSTED_DEPLOYED;
   // Pilot data through the same worker: anonymous counts of tests started and finished, and results that a
-  // player chooses to send at the end. Not from claude.ai, whose pages cannot reach the worker.
-  const PILOT_URL = !inClaude && HOSTED_URL ? HOSTED_URL.replace(/\/reply$/, '') : '';
+  // player chooses to send at the end.
+  const PILOT_URL = HOSTED_URL ? HOSTED_URL.replace(/\/reply$/, '') : '';
   function pilotEvent(ev) {
     if (!PILOT_URL) return;
     try { fetch(PILOT_URL + '/event', { method: 'POST', keepalive: true, headers: { 'content-type': 'text/plain' }, body: JSON.stringify(Object.assign({ v: PZ.VERSION }, ev)) }).catch(() => {}); }
@@ -3845,8 +3835,7 @@ HOW TO TAKE PART
     (LENGTHS[k].team ? LENGTHS[k].team.length : PZ.PUZZLES.filter(p => !p.solo).length) === teamCount(order)) || 'custom';
 
   const AI = {
-    sample: null, sampleState: inClaude ? 'checking' : 'absent',
-    settings: Object.assign({ engine: inClaude ? 'claude' : HOSTED_URL ? 'hosted' : 'scripted', model: 'claude-opus-5-5', minutes: 6, name: '', remember: false, apiKey: '', geminiKey: '' }, store.get('ai.settings', {})),
+    settings: Object.assign({ engine: HOSTED_URL ? 'hosted' : 'scripted', model: 'claude-opus-5-5', minutes: 6, name: '', remember: false, apiKey: '', geminiKey: '' }, store.get('ai.settings', {})),
     // twists: the teammate twist drawn for each team puzzle of this test (puzzles.js, drawTwists)
     phase: 'intro', order: [], twists: {}, idx: 0, results: [], cur: null, notice: '', survey: { fun: null, fair: null, comment: '', sent: false },
     root: () => $('#ai-root')
@@ -3856,12 +3845,8 @@ HOW TO TAKE PART
   if (!LENGTHS[AI.settings.length]) AI.settings.length = AI.settings.warmups === 3 ? 'extended' : (AI.settings.warmups === 1 || AI.settings.solo === true) ? 'standard' : 'quick';
   delete AI.settings.warmups; delete AI.settings.solo;
   if (AI.settings.engine === 'hosted' && !HOSTED_URL) AI.settings.engine = 'scripted';
-  if (!inClaude && AI.settings.engine === 'claude') AI.settings.engine = HOSTED_URL ? 'hosted' : 'scripted';
-  if (inClaude && ['api', 'gemini', 'hosted'].includes(AI.settings.engine)) AI.settings.engine = 'claude';
-  if (inClaude) {
-    window.claude.use('sample').then(fn => { AI.sample = fn; AI.sampleState = fn ? 'ready' : 'absent'; if (!fn && AI.settings.engine === 'claude') AI.settings.engine = 'scripted'; if (AI.phase === 'intro' && !$('#view-ai-test').hidden) AI.render(); })
-      .catch(() => { AI.sampleState = 'absent'; });
-  }
+  // older settings may name the claude.ai engine, which no longer exists
+  if (AI.settings.engine === 'claude') AI.settings.engine = HOSTED_URL ? 'hosted' : 'scripted';
   function saveSettings() {
     const st = Object.assign({}, AI.settings);
     if (!st.remember) { delete st.apiKey; delete st.geminiKey; }
@@ -3889,14 +3874,12 @@ HOW TO TAKE PART
   function renderIntro() {
     const st = AI.settings, root = AI.root();
     const last = store.get('ai.last', null), len = LENGTHS[st.length];
-    const claudeDesc = AI.sampleState === 'ready' ? 'Teammates run on your Claude account. No key needed; you will be asked to allow it once.' : AI.sampleState === 'checking' ? 'Checking whether this page can use Claude…' : 'Not available in this view.';
     const ownKey = st.engine === 'gemini' || st.engine === 'api';
     const engines = h('div', { class: 'engine-cards' },
-      inClaude ? engineCard('claude', 'Claude (in claude.ai)', claudeDesc, AI.sampleState !== 'ready') : '',
-      !inClaude && HOSTED_URL ? engineCard('hosted', 'Live AI teammates', 'Recommended. Gemini 3.8 Flash, hosted for this test. No key, no sign-up.') : '',
-      engineCard('scripted', 'Scripted teammates', inClaude || HOSTED_URL ? 'Work offline. They follow a script, so they are less lifelike.' : 'No key, no sign-up. They follow a script, so they are less lifelike than AI teammates.'));
+      HOSTED_URL ? engineCard('hosted', 'Live AI teammates', 'Recommended. Gemini 3.8 Flash, hosted for this test. No key, no sign-up.') : '',
+      engineCard('scripted', 'Scripted teammates', HOSTED_URL ? 'Work offline. They follow a script, so they are less lifelike.' : 'No key, no sign-up. They follow a script, so they are less lifelike than AI teammates.'));
     let apiBox = '';
-    if (!inClaude && st.engine === 'gemini') {
+    if (st.engine === 'gemini') {
       const keyStatus = h('p', { class: 'small muted', id: 'key-status' });
       apiBox = h('div', { class: 'flow' },
         h('div', { class: 'row' },
@@ -3913,7 +3896,7 @@ HOW TO TAKE PART
         keyStatus,
         h('p', { class: 'note small' }, 'The key stays in your browser and is sent only to generativelanguage.googleapis.com. Teammates think at the low level to keep the chat quick.'));
     }
-    if (!inClaude && st.engine === 'api') {
+    if (st.engine === 'api') {
       const keyStatus = h('p', { class: 'small muted', id: 'key-status' });
       apiBox = h('div', { class: 'flow' },
         h('div', { class: 'row' },
@@ -3929,19 +3912,18 @@ HOW TO TAKE PART
     const timeSel = h('select', { id: 'ai-min', onchange: e => { st.minutes = +e.target.value; saveSettings(); } },
       [[4, '4 minutes'], [6, '6 minutes'], [8, '8 minutes'], [0, 'No time limit']].map(([v, l]) => h('option', { value: v, selected: v === st.minutes }, l)));
     const more = h('details', { class: 'map', open: ownKey || null },
-      h('summary', {}, inClaude ? 'More options: time limit' : 'More options: time limit, your own API key'),
+      h('summary', {}, 'More options: time limit, your own API key'),
       h('div', { class: 'flow' },
         h('div', { class: 'field', style: { maxWidth: '260px' } }, h('label', { for: 'ai-min' }, 'Time per team puzzle'), timeSel),
-        inClaude ? '' : [
+        [
           h('div', { class: 'field' }, h('label', {}, HOSTED_URL ? 'Or run the teammates on your own API key' : 'Lifelike AI teammates with your own API key'),
             h('div', { class: 'engine-cards' },
               engineCard('gemini', 'Gemini 3.8 Flash', 'Your own key from Google AI Studio. Getting one takes about a minute.'),
               engineCard('api', 'Claude', 'Your own Anthropic API key.'))),
-          apiBox,
-          HOSTED_URL ? '' : h('p', { class: 'small muted' }, 'Have a Claude account? The ', h('a', { href: CLAUDE_URL, target: '_blank', rel: 'noopener' }, 'claude.ai version'), ' runs the teammates on your own account, so it needs no key, only a sign-in.')]));
+          apiBox]));
     const free = st.engine === 'scripted' || st.engine === 'hosted';
     // with an unfinished test, resuming comes first and a new start says it replaces it
-    const pending = loadProgress(), resumeWait = !!(pending && pending.cur && pending.cur.engine === 'claude' && AI.sampleState === 'checking');
+    const pending = loadProgress();
     const startBtn = () => h('button', { class: 'btn' + (pending ? '' : ' primary') + ' start-btn', type: 'button', onclick: startTest }, `${pending ? 'Start a new test' : 'Start'} · ${len.time}`);
     const setup = h('div', { class: 'panel flow', id: 'ai-setup' }, h('h3', {}, 'Start'),
       h('div', { class: 'field' }, h('label', {}, 'Length'), h('div', { class: 'length-cards' }, Object.keys(LENGTHS).map(lengthCard)),
@@ -3949,7 +3931,7 @@ HOW TO TAKE PART
       h('div', { class: 'field' }, h('label', {}, 'Teammates'), engines),
       AI.notice ? h('p', { class: 'note warn', id: 'ai-notice' }, AI.notice) : '',
       h('div', { class: 'btn-row' },
-        pending ? h('button', { class: 'btn primary', type: 'button', disabled: resumeWait || null, onclick: resumeTest }, resumeWait ? 'Checking Claude…' : 'Resume your test') : '',
+        pending ? h('button', { class: 'btn primary', type: 'button', onclick: resumeTest }, 'Resume your test') : '',
         startBtn(),
         last && !pending ? h('button', { class: 'btn', type: 'button', onclick: () => { AI.results = last.results; AI.order = last.order || last.results.map(r => r.id); AI.twists = last.twists || {}; AI.survey = last.survey || { fun: null, fair: null, comment: '', sent: false }; AI.settings.name = last.name || AI.settings.name; AI.phase = 'summary'; AI.render(); } }, 'See your last result') : ''),
       h('p', { class: 'small muted' }, free ? 'No sign-up and no key. ' : '', pending ? 'You have an unfinished test saved in this browser. Starting a new test replaces it.' : 'You can stop after any team puzzle and still get your result. If you leave mid-test, your progress is saved in this browser and you can resume.'),
@@ -4140,10 +4122,9 @@ HOW TO TAKE PART
   const clearProgress = () => store.del('ai.progress');
   function engineReady(e) {
     if (e === 'scripted') return true;
-    if (e === 'hosted') return !inClaude && !!HOSTED_URL;
-    if (e === 'claude') return inClaude && AI.sampleState === 'ready';
-    if (e === 'gemini') return !inClaude && !!AI.settings.geminiKey;
-    if (e === 'api') return !inClaude && !!AI.settings.apiKey;
+    if (e === 'hosted') return !!HOSTED_URL;
+    if (e === 'gemini') return !!AI.settings.geminiKey;
+    if (e === 'api') return !!AI.settings.apiKey;
     return false;
   }
   function resumeTest() {
@@ -4195,11 +4176,10 @@ HOW TO TAKE PART
       text = `Puzzle ${of}, ${title(pr.cur.id)}` + (pr.cur.messages.length ? `, with your chat so far` : '') + '. ' +
         (pr.cur.locked ? 'Time was up; your answers are waiting to be submitted.' : left != null ? `The clock is paused at ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}.` : 'No time limit.');
     }
-    const waiting = pr.cur && pr.cur.engine === 'claude' && AI.sampleState === 'checking';
     return h('div', { class: 'note good resume', id: 'ai-resume' },
       h('p', {}, h('strong', {}, 'Pick up where you left off. '), text, h('span', { class: 'muted' }, ` Saved ${ago(Date.now() - pr.savedAt)}.`)),
       h('div', { class: 'btn-row' },
-        h('button', { class: 'btn primary', type: 'button', disabled: waiting || null, onclick: resumeTest }, waiting ? 'Checking Claude…' : 'Resume test'),
+        h('button', { class: 'btn primary', type: 'button', onclick: resumeTest }, 'Resume test'),
         h('button', { class: 'btn quiet', type: 'button', onclick: () => { clearProgress(); renderIntro(); } }, 'Discard and start over')));
   }
   // save the clock when the page is hidden or closed (switching apps on a phone, closing the tab)
@@ -4212,7 +4192,6 @@ HOW TO TAKE PART
     AI.notice = '';
     if (st.engine === 'gemini' && !st.geminiKey) { AI.notice = 'Enter your Gemini API key, or choose scripted teammates.'; renderIntro(); }
     if (st.engine === 'api' && !st.apiKey) { AI.notice = 'Enter your Anthropic API key, or choose scripted teammates.'; renderIntro(); }
-    if (st.engine === 'claude' && AI.sampleState !== 'ready') { AI.notice = 'Claude is not available in this view. Choose scripted teammates.'; renderIntro(); }
     if (AI.notice) { const n = $('#ai-notice'); if (n) n.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
     const L = LENGTHS[st.length] || LENGTHS.quick;
     AI.order = PZ.PUZZLES.filter(p => p.solo).slice(0, L.warmups).concat(PZ.PUZZLES.filter(p => !p.solo && (!L.team || L.team.includes(p.id)))).map(p => p.id);
@@ -4311,7 +4290,6 @@ HOW TO TAKE PART
   }
   function engineLabel() {
     const e = AI.cur ? AI.cur.engine : AI.settings.engine;
-    if (e === 'claude') return 'Teammates: Claude';
     if (e === 'gemini' || e === 'hosted') return 'Teammates: Gemini 3.8 Flash';
     if (e === 'api') return 'Teammates: ' + (MODELS.find(m => m.id === AI.settings.model) || MODELS[0]).label;
     return 'Teammates: scripted';
@@ -4421,10 +4399,6 @@ HOW TO TAKE PART
     if (c.engine === 'hosted') {
       return LLM.hostedStream({ url: HOSTED_URL, version: PZ.VERSION, puzzle: c.puzzle.id, follower: fid, twist: c.puzzle.twist, messages: turns, signal, onText: t => onText(cleanReply(t, fid)) }).then(r => r.text);
     }
-    if (c.engine === 'claude') {
-      const input = [{ role: 'user', content: system + `\n\nThe chat follows. Reply with ${f.name}'s next chat message only.` }].concat(turns);
-      return AI.sample(input, { modelTier: 'quick', cache: false, signal, onText: ({ text }) => onText(cleanReply(text, fid)) }).then(r => r.text);
-    }
     return apiReply(system, turns, signal, t => onText(cleanReply(t, fid)));
   }
 
@@ -4505,14 +4479,7 @@ HOW TO TAKE PART
       if (A && (isA(e, 'AuthenticationError') || isA(e, 'PermissionDeniedError') || isA(e, 'NotFoundError') || isA(e, 'BadRequestError'))) e.fatal = true;
       return apiErrorText(e);
     }
-    const code = e && e.code;
-    const map = {
-      not_granted: 'Claude access was not allowed for this page.', sampling_disabled: 'Claude is not available for this account.',
-      rate_limited: 'Too many requests right now. Wait a moment and ask again.', refused: 'No reply to that message. Try rephrasing it.',
-      session_expired: 'Your Claude session expired. Sign in again.', empty_completion: 'No reply. Ask again.'
-    };
-    if (['not_granted', 'sampling_disabled', 'not_declared', 'capability_disabled', 'capability_removed', 'session_expired'].includes(code)) e.fatal = true;
-    return map[code] || 'The reply was interrupted. Ask again.';
+    return 'The reply was interrupted. Ask again.';
   }
 
   function scriptedReply(fid, signal) {
@@ -4747,11 +4714,6 @@ HOW TO TAKE PART
   function saveCard(canvas, status) {
     canvas.toBlob(async blob => {
       if (!blob) { status.textContent = 'Could not create the image. Right-click the card to save it.'; return; }
-      if (downloadsCap) {
-        try { await downloadsCap.save({ filename: 'leadership-test-result.png', data: blob }); return; }
-        catch (e) { if (e && e.code === 'declined') return; }
-      }
-      if (inClaude) { status.textContent = 'Saving files is not available here. Right-click the card to save it.'; return; }
       const url = URL.createObjectURL(blob), a = h('a', { href: url, download: 'leadership-test-result.png' });
       document.body.append(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 4000);
@@ -4813,7 +4775,7 @@ HOW TO TAKE PART
           h('input', { id: 'ai-name', type: 'text', value: AI.settings.name, autocomplete: 'given-name', oninput: e => { AI.settings.name = e.target.value; saveSettings(); clearTimeout(nameTimer); nameTimer = setTimeout(redraw, 350); } })),
         cardBox,
         h('div', { class: 'btn-row' },
-          // a real link: scripted pop-ups are blocked for most viewers of the claude.ai version
+          // a real link rather than a scripted pop-up, which browsers may block
           h('a', { class: 'btn primary', href: 'https://www.linkedin.com/sharing/share-offsite/?url=' + encodeURIComponent(APP_URL), target: '_blank', rel: 'noopener', onclick: () => { copyText(text, shareStatus, 'Text copied. Paste it into your post.'); } }, 'Share on LinkedIn'),
           h('button', { class: 'btn', type: 'button', onclick: () => { if (canvas) saveCard(canvas, shareStatus); } }, 'Download result card'),
           h('button', { class: 'btn quiet', type: 'button', onclick: () => copyText(text, shareStatus, 'Text copied.') }, 'Copy text'),
