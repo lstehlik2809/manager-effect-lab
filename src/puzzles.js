@@ -14,7 +14,8 @@
  * everything a couple of reports at a time.
  * The original's three follower roles are rotated over Mira, Theo and Jonas from puzzle to puzzle, so no
  * teammate is always the one holding the most.
- * Teammate twists are drawn at random for each test (drawTwists): a team puzzle gets no twist or one of
+ * Teammate twists are drawn for each test (drawTwists), balanced so that everyone on the same length meets
+ * the same set of difficulties in a random order: a team puzzle gets no twist or one of
  * five kinds, played by one teammate. A quiet teammate holds back in replies to everyone, a worried one
  * shares only once reassured, an overconfident one claims a clash that isn't there, one misquotes a shared
  * report so that it seems to rule out a right answer, and one argues that an option the reports rule out
@@ -442,7 +443,17 @@
 
   /* ---------- teammate twists, drawn at random for each test ---------- */
   const TWIST_KINDS = ['quiet', 'anxious', 'sure', 'misquote', 'dispute'];
-  const TWIST_CHANCE = 0.75;   // a team puzzle gets a twist with this probability, otherwise none
+  // Twists are balanced: everyone who takes the same length meets the same set of difficulties, and only which
+  // puzzle gets which, the teammate who plays it and the report it uses are drawn. A slot is a kind, a list of
+  // kinds of which one is drawn (two ways of hiding what a teammate knows, two ways of a wrong rule-out), or
+  // null for a puzzle without a twist. Extended has every kind once and one puzzle without.
+  const DRAW_OUT = ['quiet', 'anxious'], FALSE_OUT = ['sure', 'misquote'];
+  const TWIST_SETS = {
+    2: [DRAW_OUT, FALSE_OUT],
+    4: [DRAW_OUT, FALSE_OUT, 'dispute', null],
+    6: ['quiet', 'anxious', 'sure', 'misquote', 'dispute', null]
+  };
+  const twistSet = n => TWIST_SETS[n] || Array.from({ length: n }, (_, i) => TWIST_SETS[6][i % 6]);
   /** Every twist a team puzzle can have: [{ kind, fid, i }], i indexing p.twists[kind] where it applies.
    * A quiet or worried teammate holds a decisive report; the others can see the report their twist uses,
    * and a teammate never disputes a decisive report of their own. */
@@ -459,25 +470,25 @@
   const sameTwist = (a, b) => a.kind === b.kind && a.fid === b.fid && (a.i || 0) === (b.i || 0);
   function twistValid(p, t) { return !!t && typeof t === 'object' && twistOptions(p).some(o => sameTwist(o, t)); }
   /**
-   * A twist plan for a test: { puzzleId: { kind, fid, i } | null } for each team puzzle in ids. Each puzzle gets
-   * a twist with probability `chance`; kinds are dealt from a shuffled bag so a test repeats a kind only after
-   * using the others, and the teammate (and report) is drawn among those that fit. rand: a () => [0, 1) source.
+   * A twist plan for a test: { puzzleId: { kind, fid, i } | null } for each team puzzle in ids. The test's set of
+   * slots (TWIST_SETS, by the number of team puzzles) is dealt over the puzzles in random order, redealt until every
+   * slot fits its puzzle (t3 has no misquote); then each slot's kind, teammate and report are drawn among those that
+   * fit. rand: a () => [0, 1) source.
    */
-  function drawTwists(ids, rand, chance) {
+  function drawTwists(ids, rand) {
     rand = rand || Math.random;
-    chance = chance == null ? TWIST_CHANCE : chance;
     const shuffle = xs => { for (let i = xs.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [xs[i], xs[j]] = [xs[j], xs[i]]; } return xs; };
+    const team = ids.map(id => PUZZLES.find(x => x.id === id)).filter(p => p && !p.solo);
+    const opts = new Map(team.map(p => [p.id, twistOptions(p)]));
+    const kindsFor = (p, slot) => (Array.isArray(slot) ? slot : [slot]).filter(k => opts.get(p.id).some(o => o.kind === k));
+    let slots = shuffle(twistSet(team.length).slice());
+    for (let tries = 0; tries < 200 && !team.every((p, i) => slots[i] === null || kindsFor(p, slots[i]).length); tries++) slots = shuffle(slots);
     const plan = {};
-    let bag = [];
-    ids.forEach(id => {
-      const p = PUZZLES.find(x => x.id === id);
-      if (!p || p.solo) return;
-      plan[id] = null;
-      if (rand() >= chance) return;
-      const opts = twistOptions(p), fits = kind => opts.some(o => o.kind === kind);
-      if (!bag.some(fits)) bag = bag.concat(shuffle(TWIST_KINDS.slice()));
-      const kind = bag.splice(bag.findIndex(fits), 1)[0], pick = opts.filter(o => o.kind === kind);
-      plan[id] = pick[Math.floor(rand() * pick.length)];
+    team.forEach((p, i) => {
+      const kinds = slots[i] === null ? [] : kindsFor(p, slots[i]);
+      if (!kinds.length) { plan[p.id] = null; return; }
+      const kind = kinds[Math.floor(rand() * kinds.length)], pick = opts.get(p.id).filter(o => o.kind === kind);
+      plan[p.id] = pick[Math.floor(rand() * pick.length)];
     });
     return plan;
   }
@@ -559,6 +570,6 @@ HOW TO TAKE PART
     return '';
   }
 
-  root.MEL_PUZZLES = { VERSION, FOLLOWERS, LAYOUTS, PUZZLES, cluesFor, criticalFollowerClues, followerBrief, TWIST_KINDS, TWIST_CHANCE, twistOptions, twistValid, drawTwists, withTwist };
+  root.MEL_PUZZLES = { VERSION, FOLLOWERS, LAYOUTS, PUZZLES, cluesFor, criticalFollowerClues, followerBrief, TWIST_KINDS, TWIST_SETS, twistOptions, twistValid, drawTwists, withTwist };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.MEL_PUZZLES;
 })(typeof window !== 'undefined' ? window : globalThis);

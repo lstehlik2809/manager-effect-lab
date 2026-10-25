@@ -832,7 +832,7 @@
         // on a phone the set-up panel is far down; offer the start right here (the resume box above does it for an unfinished test)
         pending ? '' : h('div', { class: 'btn-row hero-start' }, startBtn(), h('a', { href: '#ai-setup', class: 'small', onclick: e => { e.preventDefault(); $('#ai-setup').scrollIntoView({ behavior: 'smooth' }); } }, 'Choose length and teammates'),
           h('span', { class: 'small muted' }, `${len.label}, ${st.engine === 'hosted' ? 'live AI' : st.engine === 'scripted' ? 'scripted' : 'AI'} teammates` + (free ? ', no sign-up' : ''))),
-        h('p', { class: 'note' }, h('strong', {}, 'For fun, not a verdict. '), 'This version is inspired by the study, not a copy of it. Its puzzles are new, though each copies the structure of one of the study\'s own, and here only you see the case facts that decide which reports matter; the AI models are different, and Quick and Standard use fewer puzzles. It has not been validated, so your result describes how you led today\'s game, not how good a manager you are.')),
+        h('p', { class: 'note' }, h('strong', {}, 'For fun, not a verdict. '), 'This version is inspired by the study, not a copy of it. Its puzzles are new, though each copies the structure of one of the study\'s own; here only you see the case facts that decide which reports matter; the teammates are different AI models and don\'t behave exactly like the study\'s; Quick and Standard use fewer puzzles; and the leading score is this test\'s own measure, not the study\'s. It has not been validated. And even a validated version would cover only a small part of a manager\'s job: drawing out what a team knows to make one short decision. Setting goals, coaching, motivating people, handling conflict, hiring and building trust over months are not in it. So your result describes how you led today\'s game, not how good a manager you are.')),
       h('div', { class: 'grid-2' },
         setup,
         h('div', { class: 'panel prose' }, h('h3', {}, 'How it works'),
@@ -1522,7 +1522,7 @@
       pointsSplit(A.info),
       obsLists(obs.good, obs.tips),
       h('div', { class: 'stats' },
-        h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Leading score'), h('span', { class: 'value' }, Math.round(A.info.lead), h('span', { class: 'small muted' }, ' / 100')), h('span', { class: 'sub' }, 'your score without the points lost in reasoning')),
+        h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Leading score'), h('span', { class: 'value' }, Math.round(A.info.lead), h('span', { class: 'small muted' }, ' / 100')), h('span', { class: 'sub' }, 'this test\'s own measure: your score without the points lost in reasoning')),
         h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Hidden reports surfaced'), h('span', { class: 'value' }, `${m.surfaced} of ${m.critical}`), h('span', { class: 'sub' }, 'decisive reports your teammates passed on')),
         h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Questions'), h('span', { class: 'value' }, m.questions), h('span', { class: 'sub' }, `${m.targeted} specific · ${m.generic} general · ${m.repeats} repeated`)),
         h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Follow-ups'), h('span', { class: 'value' }, m.followUps), h('span', { class: 'sub' }, `built on a teammate's answer` + (m.connects ? ` · ${m.connects} passed on to others` : ''))),
@@ -1576,7 +1576,7 @@
   const goodRating = r => r === 'strong' || r === 'efficient';
   function shareText(N, style) {
     return `I just led a team of AI agents through ${N.demo ? 'the quick demo of a leadership test, ' : ''}${N.team.length} hidden-profile puzzles: leading score ${Math.round(N.lead)}/100 (team score ${Math.round(N.teamScore)}), ${N.surfaced} of ${N.critical} hidden clues surfaced, leadership style "${style.name}". ` +
-      `It's a playful test inspired by Weidmann, Xu & Deming's research on measuring leadership with AI agents. Try it: ${APP_URL}`;
+      `It's a playful test inspired by Weidmann, Xu & Deming's research on measuring leadership with AI agents, and it covers one slice of leading: drawing out what a team knows. Try it: ${APP_URL}`;
   }
   // the puzzle order a result came from, and whether it was the Quick demo
   const orderOf = R => (AI.order.length ? AI.order : R.map(r => r.id));
@@ -1611,7 +1611,7 @@
       g.fillStyle = ink2; g.font = body('400 23px'); g.fillText(x.value, 480, y);
       g.fillStyle = goodRating(x.rating) ? pos : ink2; g.font = body('700 23px'); g.textAlign = 'right'; g.fillText(RATING[x.rating], W - 88, y); g.textAlign = 'left';
     });
-    g.fillStyle = ink2; g.font = body('400 18px'); g.fillText('A playful test inspired by Weidmann, Xu & Deming (2025). Not a validated assessment.', 88, 538);
+    g.fillStyle = ink2; g.font = body('400 18px'); g.fillText('A playful test inspired by Weidmann, Xu & Deming (2025). One slice of leading, not a validated assessment.', 88, 538);
     g.fillStyle = accent; g.font = body('600 20px'); g.fillText('Try it: ' + APP_URL.replace(/^https:\/\//, '').replace(/\/$/, ''), 88, 570);
     return c;
   }
@@ -1661,12 +1661,12 @@
           h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Leading score'), h('span', { class: 'value big' }, Math.round(N.lead), h('span', { class: 'small muted' }, ' / 100')),
             h('span', { class: 'sub' }, `points kept in leading the team · team score ${Math.round(N.teamScore)}` + (range ? ' (' + range + ')' : '') + `, mean of ${N.nq} questions`)),
           h('div', { class: 'style-box' }, h('span', { class: 'eyebrow' }, 'Your leadership style · for fun'), h('h3', {}, style.name), h('p', {}, style.text))),
-        h('p', { class: 'small muted' }, 'The leading score is 100 minus the points you lost in leading: reports your teammates held that never reached you, and wrong claims from teammates that you took on board. It leaves out the points lost in reasoning with the reports you had, so it is closer to what the study calls leadership than the team score, which mixes both.'),
+        h('p', { class: 'small muted' }, 'The leading score is 100 minus the points you lost in leading: reports your teammates held that never reached you, and wrong claims from teammates that you took on board. It leaves out the points lost in reasoning with the reports you had, which the team score mixes in. It is this test\'s own measure, not the study\'s: Study 2 measured leadership as team results after controlling for how well people reason alone, which is what comparing a group does here with team scores, and none of the study\'s evidence has been checked for the leading score.'),
         h('h3', {}, 'What you did, specifically'),
         obsLists(N.strengths, N.tips, 'What you did well', 'Try next time'),
         N.challenges.length ? [h('h3', {}, 'Teammates who made it harder'),
           h('ul', { class: 'twists' }, N.challenges.map(c => { const st = twistState(c); return h('li', {}, h('span', { class: 'pill' + (st === 'met' ? ' pos' : st === 'partly' ? '' : ' neg') }, h('span', { class: 'dot' }), st === 'met' ? 'Handled' : st === 'partly' ? 'Partly' : 'Missed'), h('span', {}, h('span', { class: 'obs-where' }, c.puzzle + ': '), twistText(c))); })),
-          h('p', { class: 'small muted' }, 'As in real teams, teammates differ. Each test draws afresh which teammate, if any, makes a puzzle harder and how. Drawing out a quiet or worried teammate, checking a confident claim or a quote, and settling a disagreement on the evidence are leadership moves too, beyond asking the right questions.')] : '',
+          h('p', { class: 'small muted' }, 'As in real teams, teammates differ; the study\'s AI followers were all cooperative, so this part is this test\'s own. Everyone who takes the same length meets the same kinds of difficulty, but which puzzle and which teammate is drawn afresh for every test. Drawing out a quiet or worried teammate, checking a confident claim or a quote, and settling a disagreement on the evidence are leadership moves too, beyond asking the right questions.')] : '',
         h('h3', {}, 'Where your points went'),
         pointsSplit({ actual: N.teamScore, use: N.use, hidden: N.hidden, twist: N.twist }),
         h('p', { class: 'small muted' }, 'Points lost in leading: reports that stayed hidden, and wrong claims from teammates that you took on board. Points lost in reasoning: how you used the reports you had. A report counts as drawn out only when a teammate cited its number, so the leading part can be overstated if teammates paraphrased.'),
@@ -1697,6 +1697,9 @@
       h('details', { class: 'panel prose' }, h('summary', { class: 'group-summary' }, h('strong', {}, 'How to read this')),
         h('ul', {},
           h('li', {}, `Your team-puzzle score is raw. It mixes how well you led with how well you reason on your own, and ${sampleText(N)} is a small sample. Study 2 measured leadership as team results after controlling for hard skills (three solo puzzles, fluid IQ and typing speed), standardised across its 249 leaders. One person's score can do neither.`),
+          h('li', {}, 'The leading score takes reasoning out in a different way: it estimates what you could have known from the reports that reached you. That is this test\'s own measure. The study\'s results, including the 0.81 correlation with leading human teams, were for its own measure and its own version of the test.'),
+          h('li', {}, 'How this version differs from Study 2: the puzzles are new, though each copies the structure of one of the study\'s; only you see the case facts that decide which reports matter (in the study, a decisive clue said so itself); the teammates are different AI models, and unlike the study\'s cooperative followers some of them make leading harder; Quick and Standard have fewer team puzzles than the study\'s six; and there are no norms.'),
+          h('li', {}, 'Even a validated version would cover a small part of a manager\'s job: drawing out and combining what a team knows to make one short decision. Setting goals, coaching and giving feedback, motivating people, handling conflict, hiring, making the case for resources and building trust over months are not in it, and these teammates have no stakes, history or feelings of their own.'),
           h('li', {}, 'The leadership style is a playful summary of the three habits above, not a validated type.'),
           h('li', {}, 'The feedback reads your chat with simple rules. A question counts as specific when it names an option, a report number or a detail from the reports; a follow-up picks up something a teammate said; a repeat asks the same people the same thing again. Unusual phrasing can be misread.'),
           h('li', {}, 'To compare people properly, collect the results files of a group who took the same version with the same teammates and load them under ', h('a', { href: '#ai-test', onclick: toGroup }, 'compare a group of test takers'), ' on the start screen.'),

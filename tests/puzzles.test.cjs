@@ -123,29 +123,32 @@ try {
     assert.strictEqual(PZ.withTwist(p, { kind: 'sure', fid: 'f1', i: 9 }).twist, null, 'an unknown twist is dropped');
     assert(!Object.keys(PZ.withTwist(p, { kind: 'quiet', fid: 'leader' }).dynamics).length, 'only teammates get twists');
   });
-  // the draw: about one puzzle in four has no twist, every kind and every teammate turns up, and a test
-  // repeats a kind only once it has used the others
+  // the draw is balanced: everyone on a length meets the same set of difficulties; which puzzle gets which, the
+  // teammate, the report and (in Quick and Standard) which of two related kinds are drawn
   let seed = 7;
   const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-  const ids = PZ.PUZZLES.map(p => p.id), seen = {}, who = new Set();
-  let none = 0, n = 0;
-  for (let k = 0; k < 2000; k++) {
-    const plan = PZ.drawTwists(ids, rand);
-    assert.deepStrictEqual(Object.keys(plan), team.map(p => p.id), 'one entry per team puzzle');
-    const kinds = [];
-    team.forEach(p => {
-      const t = plan[p.id]; n++;
-      if (!t) { none++; return; }
-      assert(PZ.twistValid(p, t), JSON.stringify(t));
-      seen[t.kind] = (seen[t.kind] || 0) + 1; who.add(t.fid); kinds.push(t.kind);
-    });
-    assert(new Set(kinds.slice(0, 5)).size === Math.min(5, kinds.length), 'no repeated kind before all five are used: ' + kinds);
-  }
-  assert(none / n > 0.2 && none / n < 0.3, 'share without a twist ' + (none / n).toFixed(3));
-  assert.deepStrictEqual(Object.keys(seen).sort(), PZ.TWIST_KINDS.slice().sort(), 'every kind is drawn');
-  assert(Object.values(seen).every(x => x > 0.15 * (n - none)), JSON.stringify(seen));
-  assert.strictEqual(who.size, 3, 'every teammate gets twists');
-  console.log('ok   teammate twists: valid candidates; random draws ' + JSON.stringify(seen) + ', none ' + none + ' of ' + n);
+  const CLASS = { quiet: 'draw-out', anxious: 'draw-out', sure: 'false-out', misquote: 'false-out', dispute: 'dispute' };
+  const LENGTHS = { quick: ['t1', 't2'], standard: ['s1', 't1', 't2', 't3', 't4'], extended: PZ.PUZZLES.map(p => p.id) };
+  const expected = { quick: 'draw-out false-out', standard: 'dispute draw-out false-out none', extended: 'anxious dispute misquote none quiet sure' };
+  const seen = {};
+  Object.entries(LENGTHS).forEach(([len, ids]) => {
+    const placed = new Set(), who = new Set(), kinds = new Set();
+    for (let k = 0; k < 1500; k++) {
+      const plan = PZ.drawTwists(ids, rand), tp = ids.filter(id => /^t/.test(id));
+      assert.deepStrictEqual(Object.keys(plan), tp, 'one entry per team puzzle');
+      const got = tp.map(id => plan[id]);
+      tp.forEach(id => { const t = plan[id]; if (t) { assert(PZ.twistValid(PZ.PUZZLES.find(p => p.id === id), t), JSON.stringify(t)); placed.add(id + ':' + t.kind); who.add(t.fid); kinds.add(t.kind); } });
+      const set = got.map(t => (!t ? 'none' : len === 'extended' ? t.kind : CLASS[t.kind])).sort().join(' ');
+      assert.strictEqual(set, expected[len], len + ' gets the same set every time');
+      assert(!(plan.t3 && plan.t3.kind === 'misquote'), 't3 has no misquote');
+    }
+    // every slot lands on every puzzle it fits, played by every teammate
+    assert.strictEqual(who.size, 3, len + ': every teammate gets twists');
+    assert.strictEqual(kinds.size, len === 'quick' ? 4 : 5, len + ': every kind of its set turns up');
+    ids.filter(id => /^t/.test(id)).forEach(id => assert(placed.size && [...placed].filter(x => x.startsWith(id + ':')).length >= (len === 'quick' ? 4 : 5) - (id === 't3' ? 1 : 0), len + ' ' + id + ': ' + [...placed].filter(x => x.startsWith(id + ':'))));
+    seen[len] = expected[len];
+  });
+  console.log('ok   teammate twists: valid candidates; balanced draws ' + JSON.stringify(seen));
 } catch (e) { failures++; console.log('FAIL twists: ' + e.message); }
 console.log(failures ? failures + ' puzzle check(s) failed' : 'all puzzles consistent');
 process.exit(failures ? 1 : 0);

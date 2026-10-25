@@ -54,15 +54,15 @@ for (const [label, script] of Object.entries(ROUTINES)) {
       rows.push({ id, kind: t ? t.kind : 'none', score: a.info.actual, lead: a.info.lead, n: msgs.filter(m => m.from === 'leader').length });
     });
   });
-  // expected over the draw: none with 25%, else each kind equally likely, each option within a kind equally likely
+  // expected over the draw as drawTwists deals Quick: each puzzle gets a hidden-knowledge twist (quiet or worried) or a
+  // wrong rule-out (overconfident or misquote), half and half, each variant and each teammate equally likely
   const exp = key => ['t1', 't2'].map(id => {
-    const r = rows.filter(x => x.id === id), kinds = [...new Set(r.filter(x => x.kind !== 'none').map(x => x.kind))];
-    const m = xs => xs.reduce((s, x) => s + x[key], 0) / xs.length;
-    return 0.25 * m(r.filter(x => x.kind === 'none')) + 0.75 * kinds.reduce((s, k) => s + m(r.filter(x => x.kind === k)), 0) / kinds.length;
+    const r = rows.filter(x => x.id === id), m = k => { const xs = r.filter(x => x.kind === k); return xs.reduce((s, x) => s + x[key], 0) / xs.length; };
+    return 0.25 * (m('quiet') + m('anxious') + m('sure') + m('misquote'));
   });
   const byKind = {};
   rows.forEach(x => { (byKind[x.kind] = byKind[x.kind] || []).push(x.lead); });
   const kindText = Object.entries(byKind).map(([k, v]) => `${k} ${Math.round(v.reduce((a, b) => a + b, 0) / v.length)}`).join(', ');
   const e = exp('score'), l = exp('lead');
-  console.log(`${label}\n   expected team score ${Math.round((e[0] + e[1]) / 2)} (t1 ${Math.round(e[0])}, t2 ${Math.round(e[1])}); expected leading score ${Math.round((l[0] + l[1]) / 2)}; share of draws at 100: ${Math.round(100 * rows.filter(x => x.score > 99.5).length / rows.length)}%\n   leading score by twist: ${kindText}`);
+  console.log(`${label}\n   expected team score ${Math.round((e[0] + e[1]) / 2)} (t1 ${Math.round(e[0])}, t2 ${Math.round(e[1])}); expected leading score ${Math.round((l[0] + l[1]) / 2)}; share of draws at 100: ${Math.round(100 * rows.filter(x => x.score > 99.5 && ['quiet', 'anxious', 'sure', 'misquote'].includes(x.kind)).length / rows.filter(x => ['quiet', 'anxious', 'sure', 'misquote'].includes(x.kind)).length)}%\n   leading score by twist: ${kindText}`);
 }
