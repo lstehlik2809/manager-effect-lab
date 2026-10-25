@@ -46,7 +46,7 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-html { background: var(--bg); }
+html { background: var(--bg); scroll-padding-top: 56px; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
   font-family: var(--font-body); font-size: 15px; line-height: 1.55;
@@ -69,7 +69,9 @@ p { margin: 0; }
 .wrap.wide { max-width: 1320px; }
 
 /* masthead */
-.mast { border-bottom: 1px solid var(--rule); background: var(--panel); }
+.mast { background: var(--panel); }
+/* the section tabs stay pinned to the top while the page scrolls; the taller masthead scrolls away */
+.tabbar { position: sticky; top: 0; z-index: 40; background: var(--panel); border-bottom: 1px solid var(--rule); }
 .mast-inner { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; padding-block: 22px 14px; }
 .brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .brand-mark { flex: none; width: 40px; height: 40px; }
