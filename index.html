@@ -4697,7 +4697,7 @@ HOW TO TAKE PART
     g.fillStyle = accent; g.font = display('700 140px'); g.fillText(score, 84, 318);
     const sw = g.measureText(score).width;
     g.fillStyle = ink2; g.font = body('500 26px'); g.fillText('/ 100', 96 + sw, 262); g.fillText('leading score', 96 + sw, 296);
-    g.font = body('400 20px'); g.fillText(`team score ${Math.round(N.teamScore)}`, 96 + sw, 326);
+    g.font = body('400 20px'); g.fillText(`team score ${Math.round(N.teamScore)} · incl. reasoning`, 96 + sw, 326);
     g.fillStyle = ink2; g.font = body('600 20px'); g.fillText('LEADERSHIP STYLE (FOR FUN)', 640, 222);
     g.fillStyle = ink; g.font = display('700 50px'); g.fillText(style.name, 640, 282);
     g.strokeStyle = rule; g.lineWidth = 2; g.beginPath(); g.moveTo(88, 350); g.lineTo(W - 88, 350); g.stroke();
@@ -4750,7 +4750,7 @@ HOW TO TAKE PART
           h('div', { class: 'btn-row', style: { marginTop: '10px' } }, h('button', { class: 'btn', type: 'button', onclick: () => { AI.settings.length = 'standard'; saveSettings(); AI.phase = 'intro'; AI.render(); window.scrollTo(0, 0); } }, 'Set up the Standard test'))) : '',
         h('div', { class: 'result-hero' },
           h('div', { class: 'stat lead' }, h('span', { class: 'label' }, 'Leading score'), h('span', { class: 'value big' }, Math.round(N.lead), h('span', { class: 'small muted' }, ' / 100')),
-            h('span', { class: 'sub' }, `points kept in leading the team · team score ${Math.round(N.teamScore)}` + (range ? ' (' + range + ')' : '') + `, mean of ${N.nq} questions`)),
+            h('span', { class: 'sub' }, `points kept in leading the team · team score ${Math.round(N.teamScore)}` + (range ? ' (' + range + ')' : '') + `: how close your answers came, reasoning included, over ${N.nq} questions`)),
           h('div', { class: 'style-box' }, h('span', { class: 'eyebrow' }, 'Your leadership style · for fun'), h('h3', {}, style.name), h('p', {}, style.text))),
         h('p', { class: 'small muted' }, 'The leading score is 100 minus the points you lost in leading: reports your teammates held that never reached you, and wrong claims from teammates that you took on board. It leaves out the points lost in reasoning with the reports you had, which the team score mixes in. It is this test\'s own measure, not the study\'s: Study 2 measured leadership as team results after controlling for how well people reason alone, which is what comparing a group does here with team scores, and none of the study\'s evidence has been checked for the leading score.'),
         h('h3', {}, 'What you did, specifically'),
